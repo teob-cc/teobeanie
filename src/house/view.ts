@@ -3,9 +3,10 @@
 // changed states. Pure: the panel imports the types and liveState().
 
 import type { InstanceCard } from "../kernel/card.js";
+import type { FactInfo } from "../kernel/host.js";
 import type { Layout, LayoutEntity } from "./layout.js";
 
-export type { InstanceCard };
+export type { InstanceCard, FactInfo };
 
 /** An entity's state as the panel needs it. Times are ms epoch. */
 export interface LiveState {
@@ -39,6 +40,8 @@ export interface HouseView {
   entities: Record<string, HouseEntity>;
   /** The cards of the active and shadow instances whose heuristic has a view(). */
   cards: InstanceCard[];
+  /** The facts (derived state), each with its value and since. */
+  facts: FactInfo[];
 }
 
 /** GET api/house/energy-today: today's totals of HA's energy dashboard sources in scope. */
@@ -56,6 +59,8 @@ export interface HouseFrame {
   states: Record<string, LiveState>;
   /** Every card again, when any changed since the last frame. */
   cards?: InstanceCard[];
+  /** Every fact again, when any changed since the last frame. */
+  facts?: FactInfo[];
 }
 
 // Attributes the panel never reads; dropped to keep frames small.

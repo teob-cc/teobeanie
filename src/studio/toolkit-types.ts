@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const TOOLKIT_DTS = ["toolkit.d.ts", "kernel/heuristic.d.ts", "kernel/rule.d.ts", "kernel/clock.d.ts", "kernel/params.d.ts"];
+export const TOOLKIT_DTS = ["toolkit.d.ts", "kernel/heuristic.d.ts", "kernel/rule.d.ts", "kernel/clock.d.ts", "kernel/params.d.ts", "kernel/fact.d.ts"];
 
 /** The declaration files, or undefined when running from source (no emitted .d.ts). */
 export function toolkitTypes(): Record<string, string> | undefined {

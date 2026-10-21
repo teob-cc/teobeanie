@@ -9,10 +9,12 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite";
+import type { HaEntityState } from "@lambda-house/teob-ts/ha";
 import { houseScope } from "../src/allowlist.js";
 import { defineHeuristic, type AnyHeuristic } from "../src/kernel/heuristic.js";
 import { createHeuristicHost, loadInstances } from "../src/kernel/host.js";
 import { createSafeActuator } from "../src/kernel/actuator.js";
+import { FACT_CATEGORY } from "../src/kernel/fact.js";
 import { STARTER_DIR } from "../src/packages/library.js";
 import { applyConfig, createReloader, watchConfig } from "../src/reload.js";
 import { configAggregate, configEventCodec, configStateCodec, createConfigJournal, CONFIG_CATEGORY, type ConfigChanged } from "../src/working-set.js";
@@ -63,6 +65,11 @@ function house() {
   writeFileSync(join(config, "tiles.json"), JSON.stringify({ tiles: [] }));
   /** The definitions the folder does not hold; a test takes one away to make a reload fail. */
   const extra: AnyHeuristic[] = [probe("probe"), probe("probe-b")];
+  /** What Home Assistant says now, for the facts. */
+  const states = new Map<string, HaEntityState>();
+  const setState = (id: string, state: string): void => {
+    states.set(id, { entity_id: id, state, attributes: {}, last_changed: "", last_updated: "" });
+  };
 
   const boot = async () => {
     const { runtime, journal } = createSqliteRuntime({ path: join(data, "journal.db") }, [registration(configAggregate, configEventCodec, configStateCodec)]);
@@ -70,7 +77,7 @@ function house() {
       library: extra,
       instances: loadInstances(config, noLog),
       actuator: createSafeActuator({ ha: { callService: async () => ({ context: { id: "x" } }) } }),
-      liveState: () => undefined,
+      liveState: (id) => states.get(id),
       scope: houseScope(["binary_sensor.a_motion", "binary_sensor.b_motion"], ["light.a", "light.b"]),
       forceShadow: false,
       log: noLog,
@@ -108,7 +115,7 @@ function house() {
     const root = join(data, "revisions", "objects");
     return existsSync(root) ? readdirSync(root).flatMap((d) => readdirSync(join(root, d))).length : 0;
   };
-  return { config, data, extra, boot, read, write, objects };
+  return { config, data, extra, boot, read, write, objects, setState };
 }
 
 describe("revisions", () => {
@@ -251,6 +258,34 @@ describe("rollback", () => {
     expect((await rollback(t, 2, "person:Alex")).journaled).toMatchObject({ revision: 4, summary: "rollback to 2" });
     expect(t.host.instances()[0]?.mode).toBe("active");
     expect(h.read("packages/hold/README.md")).toBe(readFileSync(join(STARTER_DIR, "hold", "README.md"), "utf8"));
+  });
+
+  it("takes the facts in heuristics/ with it, and evaluates them again", async () => {
+    const h = house();
+    const factFile = (state: string): string =>
+      `import { fact } from "teobeanie";\nexport default fact("a-busy", ({ ha }) => ha.binary_sensor.a_motion.is("${state}"));\n`;
+    h.write("heuristics/busy.ts", factFile("on"));
+    h.setState("binary_sensor.a_motion", "off");
+    const t = await h.boot();
+    expect(Object.keys(t.store.get(1)!.files)).toContain("heuristics/busy.ts");
+    await t.reloader.reload("file"); // the boot host had no facts: the folder's are loaded now
+    await t.host.start({ subscribeTrigger: async () => async () => {} });
+    const value = () => t.host.facts().find((f) => f.id === "a-busy")?.value;
+    expect(value()).toBe(false);
+
+    // The fact's definition changes: a revision, and the fact is evaluated again.
+    h.write("heuristics/busy.ts", factFile("off"));
+    const changed = await t.reloader.reload("file");
+    expect(changed.journaled).toMatchObject({ file: "heuristics/busy.ts", summary: "no instance changed" });
+    expect(value()).toBe(true);
+
+    // Rolled back: the old definition, evaluated again, journaled as a change of the fact.
+    const back = await rollback(t, 1, "person:Alex");
+    expect(back).toMatchObject({ ok: true, journaled: { summary: "rollback to 1", file: "heuristics/busy.ts" } });
+    expect(h.read("heuristics/busy.ts")).toBe(factFile("on"));
+    expect(value()).toBe(false);
+    const changes = t.journal.queryEvents({ category: FACT_CATEGORY, entityId: "a-busy", order: "asc", limit: 100 }).filter((r) => r.manifest === "FactChanged");
+    expect(changes.map((r) => (r.payload as { value: unknown }).value)).toEqual([false, true, false]);
   });
 
   it("a rejected rollback puts every file back and journals nothing", async () => {

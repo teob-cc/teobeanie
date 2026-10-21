@@ -1,6 +1,7 @@
 // twins.ts — a shadow twin beside an active instance: a package upgrade, new params or a
 // rewritten rule, deciding on the same inputs as the original without acting. Here the
-// two are compared: per input signal (its obsId), the actions each decided, and where
+// two are compared: per input signal (its obsId) and per fact change (its FactChanged,
+// which both hear: a twin reads the same facts), the actions each decided, and where
 // they differ. Promote swaps them in one edit of heuristics.json, so it is one revision
 // and a rollback undoes it.
 //
@@ -25,6 +26,7 @@ export interface TwinSide {
 
 /** An input on which the twin and its original decided different actions. */
 export interface TwinDifference {
+  /** The input's shared id: the signal's obsId, or the FactChanged's event id. */
   obsId: string;
   /** When it was decided (the journal row's time, ms). */
   at: number;
@@ -39,7 +41,7 @@ export interface TwinComparison {
   original: string;
   from: number;
   to: number;
-  /** Signals either decided on since the twin's first decision. */
+  /** Signals and fact changes either decided on since the twin's first decision. */
   compared: number;
   /** Of those, the ones on which both decided the same actions. */
   same: number;
@@ -74,7 +76,7 @@ interface Decision {
   actions: Action[];
 }
 
-/** Per input signal (obsId), what the instance decided; and how many other decisions. */
+/** Per input signal (obsId) or fact change (FactChanged event id), what the instance decided; and how many other decisions. */
 function decisionsByObs(rows: JournalQueryRow[]): { byObs: Map<string, Decision>; other: number } {
   const actions = new Map<string, Action[]>();
   for (const r of rows) {
@@ -88,7 +90,7 @@ function decisionsByObs(rows: JournalQueryRow[]): { byObs: Map<string, Decision>
     if (r.manifest !== "Decided") continue;
     const d = r.payload as { input: InputSummary; why?: string };
     const obsId = r.envelope?.causationId;
-    if (d.input.kind !== "signal" || obsId === undefined) {
+    if ((d.input.kind !== "signal" && d.input.kind !== "fact") || obsId === undefined) {
       other++;
       continue;
     }
@@ -108,7 +110,7 @@ const sameActions = (a: Action[], b: Action[]): boolean => JSON.stringify(a.map(
 
 /**
  * Where a twin's decisions differ from its original's on the same inputs, over
- * [fromMs, toMs]: per input signal either of them decided on since the twin's first
+ * [fromMs, toMs]: per input signal or fact change either of them decided on since the twin's first
  * journaled row, the actions each decided (requested, suppressed or refused alike).
  */
 export function compareTwin(

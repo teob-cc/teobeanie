@@ -19,7 +19,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } fr
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AnyHeuristic } from "../kernel/heuristic.js";
-import { heuristicFiles, isHeuristicSource, loadModules, type SourceModule } from "../kernel/custom.js";
+import type { AnyFact } from "../kernel/fact.js";
+import { heuristicFiles, isHeuristicSource, loadModules, type LoadedFact, type SourceModule } from "../kernel/custom.js";
 import { checkAgainstDefinition, MANIFEST, parseManifest, satisfies, SDK_VERSION, type Manifest } from "./manifest.js";
 import { packageFiles, packageHash, readLock, writeLock, type Lock, type LockEntry, type Origin } from "./lock.js";
 
@@ -51,20 +52,28 @@ export interface PackageInfo {
   heuristics: string[];
   /** Per heuristic id, the file (relative to dir) that defines it. */
   sources: Record<string, string>;
+  /** The fact ids it defines (fact.ts), with the file of each (relative to dir). */
+  facts: string[];
+  factSources: Record<string, string>;
   manifest: Manifest;
 }
 
-/** Where a heuristic came from. */
+/** Where a heuristic (or a fact) came from. */
 export interface HeuristicSource {
   file: string;
   /** Its package's name; absent: a file in heuristics/. */
   package?: string;
+  /** A fact's export: its name in the module, or "default" (custom.ts LoadedFact.binding). */
+  binding?: string;
 }
 
 export interface Library {
   heuristics: AnyHeuristic[];
   packages: PackageInfo[];
   sources: Map<string, HeuristicSource>;
+  /** The facts the packages and the house's files define (fact.ts), and where each is. */
+  facts: AnyFact[];
+  factSources: Map<string, HeuristicSource>;
 }
 
 export interface StarterPackage {
@@ -160,6 +169,9 @@ export async function loadLibrary(
   const heuristics: AnyHeuristic[] = [];
   const packages: PackageInfo[] = [];
   const sources = new Map<string, HeuristicSource>();
+  const factsTaken = new Set<string>();
+  const facts: AnyFact[] = [];
+  const factSources = new Map<string, HeuristicSource>();
 
   for (const { dir, installed: inFolder } of dirs) {
     const name = dir.split(/[\\/]/).pop()!;
@@ -170,8 +182,15 @@ export async function loadLibrary(
       if (!satisfies(SDK_VERSION, manifest.platform)) throw new Error(`platform: needs "teobeanie" ${manifest.platform}, this is ${SDK_VERSION}`);
       const hash = packageHash(dir);
       const own = new Set(taken);
-      const loaded = await loadModules(entryModules(dir, name, manifest, hash.slice(7, 23)), own, () => {}, problems);
+      const ownFacts: LoadedFact[] = [];
+      const loaded = await loadModules(entryModules(dir, name, manifest, hash.slice(7, 23)), own, () => {}, problems, { taken: new Set(factsTaken), out: ownFacts });
       if (problems.length === 0) {
+        const factIds = ownFacts.map((l) => l.fact.id);
+        const named = Object.keys(manifest.facts ?? {});
+        const unnamed = factIds.filter((id) => !named.includes(id));
+        const undefinedFacts = named.filter((id) => !factIds.includes(id));
+        if (undefinedFacts.length > 0) problems.push(`${MANIFEST} names fact ${undefinedFacts.join(", ")}, which the code does not define`);
+        if (unnamed.length > 0) problems.push(`the code defines fact ${unnamed.join(", ")}, which ${MANIFEST} does not name (under "facts")`);
         const ids = loaded.map((l) => l.def.id);
         const declared = Object.keys(manifest.heuristics);
         const missing = declared.filter((id) => !ids.includes(id));
@@ -189,6 +208,11 @@ export async function loadLibrary(
         heuristics.push(l.def);
         sources.set(l.def.id, { file: l.file, package: name });
       }
+      for (const l of ownFacts) {
+        factsTaken.add(l.fact.id);
+        facts.push(l.fact);
+        factSources.set(l.fact.id, { file: l.file, package: name, ...(l.binding !== undefined ? { binding: l.binding } : {}) });
+      }
       packages.push({
         name,
         version: manifest.version,
@@ -201,6 +225,8 @@ export async function loadLibrary(
         files: packageFiles(dir),
         heuristics: loaded.map((l) => l.def.id),
         sources: Object.fromEntries(loaded.map((l) => [l.def.id, relative(dir, l.file).split("\\").join("/")])),
+        facts: ownFacts.map((l) => l.fact.id),
+        factSources: Object.fromEntries(ownFacts.map((l) => [l.fact.id, relative(dir, l.file).split("\\").join("/")])),
         manifest,
       });
     } catch (err) {
@@ -210,11 +236,16 @@ export async function loadLibrary(
     }
   }
 
-  for (const l of await loadModules(heuristicFiles(configDir), taken, log, failures)) {
+  const ownFacts: LoadedFact[] = [];
+  for (const l of await loadModules(heuristicFiles(configDir), taken, log, failures, { taken: factsTaken, out: ownFacts })) {
     heuristics.push(l.def);
     sources.set(l.def.id, { file: l.file });
   }
-  return { heuristics, packages, sources };
+  for (const l of ownFacts) {
+    facts.push(l.fact);
+    factSources.set(l.fact.id, { file: l.file, ...(l.binding !== undefined ? { binding: l.binding } : {}) });
+  }
+  return { heuristics, packages, sources, facts, factSources };
 }
 
 export interface InstallReport {

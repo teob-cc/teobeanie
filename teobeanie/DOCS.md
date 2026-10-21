@@ -65,35 +65,63 @@ The heuristic types and their parameters are described in
 |---|---|
 | House | The whole house scope, live: energy flow and today's totals, doors and windows, lights, climate, outdoor, presence, safety and the rest, each section with a summary on top and its entities below; the heuristic instances' cards, with their buttons (a garage door's open and close). Grouping and names are adjustable in `tiles.json` ([docs/house.md](https://github.com/teob-cc/teobeanie/blob/main/docs/house.md)) |
 | Decisions | Every heuristic decision: why, actions (would / did / refused), timers, causation chain; optionally your existing automations' calls interleaved |
-| Heuristics | One card per instance: mode, last decision, 24 h activity, agreement with existing automations, pending timers. Click a card for its history and configuration |
+| Heuristics | One card per instance: mode, last decision, 24 h activity, agreement with existing automations, pending timers. Click a card for its history and configuration. **Revisions** lists every applied change with who made it, shows its diff and rolls back to any of them; a shadow twin's card shows where it decides differently from its original, and **Promote** swaps them |
 | Calls | Every `call_service` in Home Assistant, with who made it: Teobeanie, a person (by HA user name), a system user such as the Supervisor (other add-ons call as it), or `device` when the call carries no user. Reading user names needs an admin token; without one users show as `user <id>` |
 | Studio | Your rules and heuristics in an editor typed against the house scope, with their tests running as you type; the packages in `packages/` read-only, with the instances that use them |
+| Connect | Agent tokens: mint one per AI agent (shown once, with the line to paste into Claude Code and the JSON for other MCP clients), see when each was made, by whom and last used, and revoke it |
 
 ## MCP tools for agents
 
 The add-on serves the house as read-only [MCP](https://modelcontextprotocol.io) tools at
-`/mcp`: `house_scope`, `house_state`, `recent_changes` (who changed what: Teobeanie, a person,
+`/mcp`: `house_scope`, `house_state` (with the instances' cards and the facts, the derived state
+the heuristics read), `recent_changes` (who changed what: Teobeanie, a person,
 a system user such as the Supervisor, an automation, the device), `history`, `heuristics`,
 `heuristic_source`, `decisions`, `chain` (why a journaled event happened, back to the
 signal that started it), `signals` (an entity's recorded rows over a range), `timeline`
-(changes, calls, decisions, the pause and config edits around an entity or an instance,
-in time order), `tool_calls` and `whoami`. Only the house scope
+(changes, calls, decisions, fact changes, the pause and config edits around an entity, an
+instance or a fact, in time order), `tool_calls` and `whoami`. Only the house scope
 (`allowlist.json`) exists for them, and every call is journaled with its caller.
 
-The only way in is Home Assistant ingress, so Home Assistant authenticates every
-request, and the client must connect from one of the `mcp_networks`: by default the
-private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, fe80::/10) and
-Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is refused unless you
-add its network. A local MCP client such as Claude Code connects through
-`scripts/teobeanie-mcp-bridge.mjs`, which opens an ingress session with a long-lived token
-of an admin user and finds the installed add-on by itself (`ADDON=<slug>` picks one):
+Five more explore all of Home Assistant, outside the house scope too: `ha_registry`
+(areas, devices, entities), `ha_states` (current states), `ha_history` (the recorder,
+at most 7 days per call), `ha_services` (services and their fields) and `suggest` (the
+behaviour packages whose roles your entities fill, pre-bound). They only read, and
+nothing they read is recorded; the calls are journaled like the others. With them an
+agent needs no Home Assistant MCP server of its own.
+
+There are two ways in, and both accept only clients from the `mcp_networks`: by
+default the private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7,
+fe80::/10) and Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is
+refused unless you add its network.
+
+**The agent port** (8199, see [Network](#network)) serves `/mcp` and nothing else. Each
+request needs `Authorization: Bearer <agent token>`. Mint a token on the panel's
+**Connect** page: it is shown once, with the line to paste:
+
+```bash
+claude mcp add --transport http teobeanie http://homeassistant.local:8199/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Every call is journaled with the caller `agent:<token name>`. Only a salted hash of
+each token is kept (in `/data`). Revoking a token on the Connect page refuses it from
+the next request on. Minting and revoking are journaled with who did it, and only an
+admin's panel session (through ingress) can do either. Too many wrong tokens from one
+address are refused for ten minutes.
+
+**Home Assistant ingress** is the fallback: Home Assistant authenticates the request.
+A local MCP client that speaks only stdio connects through
+`scripts/teobeanie-mcp-bridge.mjs`, which opens an ingress session with a long-lived
+token of an admin user and finds the installed add-on by itself (`ADDON=<slug>` picks
+one):
 
 ```bash
 claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 \
   -e HA_TOKEN_FILE=<file with the token> -- node scripts/teobeanie-mcp-bridge.mjs
 ```
 
-`HA_URL` is Home Assistant's address on your LAN or your tailnet.
+`HA_URL` is Home Assistant's address on your LAN or your tailnet. Calls through the
+bridge are journaled with the Home Assistant user.
 
 ## Configuration
 
@@ -111,9 +139,33 @@ claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 \
 | `monitor_ha_down_min` | Minutes Home Assistant may be unreachable before the chat is told (default 5) |
 | `time_zone` | The house's time zone (e.g. `America/New_York`) for time-of-day rules, the daily summary and local times; empty (the default) uses Home Assistant's |
 | `signal_retention_days` | Raw-signal ring retention (decisions are kept forever) |
-| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
+| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, on the agent port or through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The Supervisor network (172.30.32.0/23) is let in on the agent port only when listed as itself (see [Network](#network)). The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
 | `shadow_mode` | Emergency switch: forces every instance to shadow, so nothing actuates (default off) |
 | `log_level` | Add-on log verbosity |
+
+## Network
+
+| Port | Meaning |
+|---|---|
+| `8199/tcp` | The agent port: `/mcp` for AI agents with an agent token, and nothing else. Default host port 8199. Change it here if 8199 is taken on the host; clear it to close the port (the bridge through ingress still works). The Connect page reads the host port from here. Restart the add-on after a change |
+
+The port speaks plain HTTP: on your LAN the token travels unencrypted, on your tailnet
+it is encrypted. Do not forward it to the internet. The panel and its API stay behind
+ingress only.
+
+The agent port checks the address of the machine that connects against `mcp_networks`.
+On Home Assistant OS the host's port mapping may hide that address: the add-on then
+sees the Supervisor network's gateway (172.30.32.1) for every client, from your LAN or
+from anywhere else. The default 172.16.0.0/12 contains that address, so the agent port
+refuses any client in the Supervisor network (172.30.32.0/23) with a 403 that says the
+port mapping hides the client's address, and logs it once. Two ways on:
+
+- Connect through the bridge over ingress (see [MCP tools for agents](#mcp-tools-for-agents)).
+  Home Assistant passes the real client address there.
+- Or add `172.30.32.0/23` to `mcp_networks` yourself. Do it knowing that the agent port
+  then lets in any address that reaches the host's port, and only the agent token
+  protects it. A wider range such as 172.16.0.0/12 does not count: the network has to
+  be listed as itself.
 
 ## Self-monitoring
 
@@ -143,7 +195,9 @@ It is read from the journal, so a restart during the day loses nothing.
 ## Data
 
 Everything durable lives in `/data` (included in Home Assistant backups):
-`journal.db` (decisions, kept forever) and `views.db` (rebuildable read models).
+`journal.db` (decisions, kept forever), `views.db` (rebuildable read models),
+`revisions/` (the config folder at each revision) and `agent-tokens.json` (the agent
+tokens' names and salted hashes, never the tokens).
 The raw-signal ring `signals.db` is excluded from backups by design.
 
 Your configuration (`heuristics.json`, the packages in `packages/` with
@@ -153,10 +207,10 @@ Studio Code Server add-ons.
 
 ## Configuration files
 
-A saved change to `heuristics.json`, `allowlist.json` or `tiles.json` is applied
+A saved change to `heuristics.json`, `allowlist.json`, `tiles.json`,
+`teobeanie.lock.json` or anything under `heuristics/` and `packages/` is applied
 about a second later, without a restart. **Reload config** on the Heuristics tab
-does the same on demand, and also picks up edited `heuristics/*.js` files and
-packages (saving one from the Studio does not reload by itself).
+does the same on demand.
 
 - Only what changed restarts: an instance that was added, removed, or whose mode,
   params or code changed. It replays its own journal stream, so its timers survive.
@@ -170,6 +224,10 @@ packages (saving one from the Studio does not reload by itself).
   again.
 - Every reload is logged in one line, for example
   `reload (file): +1 −0 ~2 (mode) unchanged 18`.
+- Every applied change is a numbered revision. **Roll back…** on the Heuristics tab
+  puts the folder back as it was at one, facts and packages included, through the same
+  all-or-nothing path; the rollback is a revision too
+  ([docs/working-set.md](https://github.com/teob-cc/teobeanie/blob/main/docs/working-set.md#undoing-a-change)).
 
 The add-on options on the Configuration tab (Telegram, `shadow_mode`, log level, ...)
 still need an add-on restart.

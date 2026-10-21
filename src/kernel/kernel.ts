@@ -30,6 +30,7 @@ import {
 } from "@lambda-house/teob-ts/core";
 import type { AnyHeuristic, HouseFacts, Observed } from "./heuristic.js";
 import type { Mode, SafeActuator } from "./actuator.js";
+import type { FactReading } from "./rule.js";
 import { RESEND_WITHIN_MS, applyEvent, decideStep, inputOf, resendStep, type KCommand, type KState, type StepGate } from "./step.js";
 
 export * from "./step.js";
@@ -55,6 +56,8 @@ export interface CompileDeps {
   log: (level: "debug" | "info" | "warn" | "error", msg: string) => void;
   /** Facts about the house (outdoor sources) every decision sees. */
   house?: HouseFacts;
+  /** The derived facts' values now (fact.ts), by id or name. */
+  fact?: (name: string) => FactReading | undefined;
   /** The heuristic's state as it now stands: recovered (seen at each command) and after each event. */
   onState?: (state: unknown) => void;
 }
@@ -91,7 +94,7 @@ export function compileHeuristic(def: AnyHeuristic, deps: CompileDeps): Compiled
       const key = `${def.id}/${ctx.entityId}`;
       const notifyPerHour = inst.notifyPerHour ?? def.notifyPerHour ?? DEFAULT_NOTIFY_PER_HOUR;
       const gate: StepGate = { mode: inst.mode, vet: (action, now) => deps.actuator.vet(key, action, now, notifyPerHour) };
-      const decided = decideStep(def, inst.params, ctx.entityId, ks, input, deps.observe, gate, ulid, deps.house);
+      const decided = decideStep(def, inst.params, ctx.entityId, ks, input, deps.observe, gate, ulid, deps.house, deps.fact);
       // Settling an interrupted action and resending it (a notice) is one batch.
       const resent = cmd.tag === "Interrupted" ? resendStep(ks, cmd.actionId, cmd.at, gate, resendWithinMs, ulid) : undefined;
       const step = resent === undefined ? decided : { ...decided, events: [...decided.events, ...resent.events], fire: [...decided.fire, ...resent.fire] };

@@ -4,6 +4,7 @@
 
 import type { Action, AnyHeuristic, DecideCtx, Decision, HouseFacts, Input, Json, Observed, TimerOp, Value } from "./heuristic.js";
 import type { ActionOutcome, Mode, Verdict } from "./actuator.js";
+import type { FactReading } from "./rule.js";
 
 // ---- journal shapes ----
 
@@ -13,6 +14,8 @@ export interface InputSummary {
   value?: Value;
   state?: string;
   timer?: string;
+  /** A fact input: the fact that changed (its value in value, when a plain one). */
+  fact?: string;
   trigger?: string;
   command?: string;
   args?: string[];
@@ -22,7 +25,8 @@ export interface InputSummary {
 }
 
 export type KernelEvent =
-  | { tag: "Decided"; input: InputSummary; why?: string; reads: Record<string, Value>; mode: Mode }
+  /** facts: every fact read (ctx.fact, a rule's ha.facts), by id as read. */
+  | { tag: "Decided"; input: InputSummary; why?: string; reads: Record<string, Value>; facts?: Record<string, Json>; mode: Mode }
   | { tag: "DecideFailed"; input: InputSummary; error: string }
   | { tag: "TimerSet"; timer: string; at: number; data?: Json; eid: string }
   | { tag: "TimerCancelled"; timer: string }
@@ -114,6 +118,10 @@ function summarize(input: Input): InputSummary {
       return { kind: "signal", entity: input.entity, value: input.value, state: input.state };
     case "timer":
       return { kind: "timer", timer: input.timer };
+    case "fact": {
+      const v = input.value;
+      return { kind: "fact", fact: input.fact, ...(v === null || typeof v !== "object" ? { value: v } : {}) };
+    }
     case "trigger":
       return { kind: "trigger", trigger: input.trigger };
     case "outcome":
@@ -131,6 +139,8 @@ function causeOf<S>(ks: KState<S>, input: Input): string | undefined {
       return ks.timers[input.timer]?.eid;
     case "outcome":
       return input.actionId;
+    case "fact":
+      return input.eventId;
     default:
       return undefined;
   }
@@ -156,6 +166,8 @@ export function decideStep<S>(
   gate: StepGate,
   newId: () => string,
   house: HouseFacts = {},
+  /** The facts' values now, by id or name (fact.ts); none: every fact is unknown. */
+  facts: (name: string) => FactReading | undefined = () => undefined,
 ): StepResult {
   if (gate.mode === "off") return EMPTY;
 
@@ -182,6 +194,7 @@ export function decideStep<S>(
     reads[entity] = o === undefined ? null : o.value;
     return o;
   };
+  const factReads: Record<string, Json> = {};
   const ctx: DecideCtx<unknown> = {
     now: input.at,
     params,
@@ -191,6 +204,11 @@ export function decideStep<S>(
     timer(id) {
       return ks.timers[id]?.at;
     },
+    fact: ((name: string) => {
+      const r = facts(name);
+      factReads[name] = r === undefined ? null : r.value;
+      return r;
+    }) as DecideCtx<unknown>["fact"],
     house,
   };
 
@@ -216,6 +234,7 @@ export function decideStep<S>(
       input: summarize(input),
       ...(decision?.why !== undefined ? { why: decision.why } : {}),
       reads,
+      ...(Object.keys(factReads).length > 0 ? { facts: factReads } : {}),
       mode: gate.mode,
     },
     eventId: decidedId,

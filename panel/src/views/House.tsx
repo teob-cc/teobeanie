@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type HealthReport } from "../api";
-import type { HouseEntity, HouseView, TileSpecView } from "../../../src/house/view";
+import type { FactInfo, HouseEntity, HouseView, TileSpecView } from "../../../src/house/view";
 import { attention, compassPoint, num } from "../../../src/house/summary";
 import { HouseSection } from "../components/HouseSection";
+import { EntityTimeline, factText } from "../components/EntityTimeline";
 import { PackageCards } from "../components/PackageCard";
 import { StatTile } from "../components/Tile";
 import { fmtBytes, fmtNum, rel } from "../format";
@@ -80,6 +81,7 @@ export function House({
           <Attention att={att} now={now} />
           <Pinned view={view} now={now} />
           <PackageCards cards={view.cards ?? []} now={now} onDecisions={onDecisions} />
+          <Facts facts={view.facts ?? []} now={now} open={openState["facts"] ?? true} onToggle={() => setOpen("facts", !(openState["facts"] ?? true))} />
           {view.sections.map((s) => (
             <HouseSection
               key={s.id}
@@ -139,6 +141,60 @@ function Attention({ att, now }: { att: ReturnType<typeof attention>; now: numbe
         </div>
       )}
     </section>
+  );
+}
+
+// ---- facts: derived state, with each one's timeline ------------------------------
+
+function Facts({ facts, now, open, onToggle }: { facts: FactInfo[]; now: number; open: boolean; onToggle: () => void }) {
+  const [shown, setShown] = useState<string | null>(null);
+  if (facts.length === 0) return null;
+  const holding = facts.filter((f) => f.value === true).length;
+  return (
+    <section className={open ? "hsec" : "hsec hsec-closed"} aria-label="facts">
+      <h3 className="hsec-head">
+        <button className="hsec-toggle" aria-expanded={open} onClick={onToggle}>
+          <span className="hsec-chev" aria-hidden="true">
+            ▸
+          </span>
+          <span className="hsec-title">Facts</span>
+          <span className="hsec-line muted">{holding > 0 ? `${holding} true now` : "derived from the house, read by the heuristics"}</span>
+          <span className="hsec-count muted small tnum">{facts.length}</span>
+        </button>
+      </h3>
+      {open && (
+        <div className="hsec-body">
+          <div className="hgroup">
+            {facts.map((f) => (
+              <FactRow key={f.id} f={f} now={now} expanded={shown === f.id} onToggle={() => setShown(shown === f.id ? null : f.id)} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Title · value · since when; click for what it reads and its timeline. */
+function FactRow({ f, now, expanded, onToggle }: { f: FactInfo; now: number; expanded: boolean; onToggle: () => void }) {
+  const value = f.known ? `${factText(f.value)}${f.unit !== undefined ? ` ${f.unit}` : ""}` : "unknown";
+  const tone = !f.known ? "hrow-val muted" : f.value === true ? "chip chip-ok" : "hrow-val tnum";
+  return (
+    <div className="hrow">
+      <button className="hrow-main" onClick={onToggle} title={f.description ?? f.id} aria-expanded={expanded}>
+        <span className="hrow-name">{f.title}</span>
+        <span className={tone}>{value}</span>
+        <span className="hrow-age muted small tnum">{f.since !== null ? rel(now, f.since) : ""}</span>
+      </button>
+      {expanded && (
+        <div className="hrow-hist small muted">
+          reads {[...f.watch, ...f.facts.map((x) => `fact ${x}`)].join(", ") || "nothing"}
+          {f.readers.length > 0 && <> · read by {f.readers.join(", ")}</>}
+          <code className="hrow-id">{f.id}</code>
+        </div>
+      )}
+      {expanded && <EntityTimeline fact={f.id} />}
+    </div>
   );
 }
 

@@ -13,10 +13,12 @@ import { AUDIT_CATEGORY } from "../audit.js";
 import { LEGACY_ORIGIN, OWN_ORIGIN, type UserDirectory } from "../attribution.js";
 import { houseZone, localInstant, localTimeOn } from "../kernel/clock.js";
 import type { Action, HouseFacts } from "../kernel/heuristic.js";
-import type { InstanceInfo } from "../kernel/host.js";
+import type { FactInfo, InstanceInfo } from "../kernel/host.js";
+import { FACT_CATEGORY } from "../kernel/fact.js";
 import type { InputSummary } from "../kernel/step.js";
 import { CONTROL_CATEGORY } from "../pause.js";
 import { CONFIG_CATEGORY } from "../working-set.js";
+import { callerLabel, type Caller } from "./access.js";
 
 /**
  * Where the working set's edits are journaled, as `ConfigChanged { at, file, by, summary,
@@ -37,6 +39,8 @@ export interface RecordDeps {
   journal: JournalReader;
   users: UserDirectory;
   instances(): InstanceInfo[];
+  /** The facts that run (host.facts()): what they read, who reads them. */
+  facts?(): FactInfo[];
   house: HouseFacts;
   now?: () => number;
 }
@@ -104,6 +108,8 @@ export function describeInput(i: InputSummary | undefined): string {
       return `${i.entity ?? "?"} → ${i.state ?? String(i.value)}`;
     case "timer":
       return `timer ${i.timer ?? "?"}`;
+    case "fact":
+      return `fact ${i.fact ?? "?"}${i.value !== undefined ? ` → ${String(i.value)}` : ""}`;
     case "trigger":
       return `trigger ${i.trigger ?? "?"}`;
     case "command":
@@ -175,7 +181,9 @@ export type TimelineRow =
   | { at: number; kind: "change"; entity: string; from?: string; to: string; by: Cause; obs_id: string }
   | { at: number; kind: "call"; service: string; entities: string[]; data?: unknown; by: Cause; event_id: string }
   | ({ kind: "decision" } & DecisionRow & { event_id: string })
-  | { at: number; kind: "pause" | "config"; summary: string; by?: string; event_id: string; instances?: string[] };
+  | { at: number; kind: "pause" | "config"; summary: string; by?: string; event_id: string; instances?: string[] }
+  /** A fact's value changed (FactChanged); cause: the signal, timer hold or fact change behind it. */
+  | { at: number; kind: "fact"; fact: string; value: unknown; why?: string; input?: string; event_id: string; cause?: string };
 
 export interface Page<R> {
   from: number;
@@ -394,8 +402,12 @@ export function createHouseRecord(deps: RecordDeps) {
         return `${String(p["domain"])}.${String(p["service"])} ${ids.length > 0 ? ids.join(", ") : "(outside the house scope)"}${typeof p["by"] === "string" ? ` by ${shownBy(p["by"])}` : ""}`;
       }
       case "ToolCalled": {
-        const caller = (p["caller"] ?? {}) as { user?: string; via?: string };
-        return `${String(p["tool"])} by ${caller.user ?? caller.via ?? "?"}${p["ok"] === false ? `: ${String(p["error"])}` : ""}`;
+        return `${String(p["tool"])} by ${callerLabel((p["caller"] ?? {}) as Partial<Caller>)}${p["ok"] === false ? `: ${String(p["error"])}` : ""}`;
+      }
+      case "AgentTokenMinted":
+        return `agent token "${String(p["name"])}" minted by ${String(p["by"])}`;
+      case "AgentTokenRevoked": {
+        return `agent token ${String(p["id"])} revoked by ${String(p["by"])}`;
       }
       case "Paused":
         return `paused by ${String(p["by"])}${p["reason"] !== undefined ? `: ${String(p["reason"])}` : ""}`;
@@ -403,6 +415,10 @@ export function createHouseRecord(deps: RecordDeps) {
         return `resumed by ${String(p["by"])}`;
       case "ConfigChanged":
         return `${String(p["file"])}: ${String(p["summary"])}`;
+      case "FactChanged":
+        return `${String(p["fact"])} → ${JSON.stringify(p["value"])}${p["why"] !== undefined ? ` (${String(p["why"])})` : ""}`;
+      case "FactTracked":
+        return `${String(p["fact"])}: its time conditions moved`;
       default: {
         const { tag, ...rest } = p;
         const json = JSON.stringify(rest);
@@ -511,24 +527,36 @@ export function createHouseRecord(deps: RecordDeps) {
    * of what it watches and owns, the calls on what it owns), with the pause and the
    * config changes, in time order.
    */
-  async function timeline(target: { entity?: string; instance?: string }, q: RangeQuery): Promise<Page<TimelineRow> & { entity?: string; instance?: string }> {
+  async function timeline(target: { entity?: string; instance?: string; fact?: string }, q: RangeQuery): Promise<Page<TimelineRow> & { entity?: string; instance?: string; fact?: string }> {
     const { fromMs, toMs } = q;
     const all = deps.instances();
+    const allFacts = deps.facts?.() ?? [];
     let entities: string[];
     let instances: InstanceInfo[];
-    if ((target.entity === undefined) === (target.instance === undefined)) throw new Error("give either entity or instance");
+    /** The facts whose changes show. */
+    let facts: string[];
+    if ([target.entity, target.instance, target.fact].filter((t) => t !== undefined).length !== 1) throw new Error("give one of entity, instance or fact");
     if (target.entity !== undefined) {
       const e = target.entity;
       if (!deps.scope.observes(e)) throw new Error(`${e} is outside the house scope`);
       entities = [e];
       instances = all.filter((i) => i.watch.includes(e) || i.reads.includes(e) || i.actuates.includes(e) || i.uses.includes(e));
-    } else {
-      const k = target.instance!;
+      facts = allFacts.filter((f) => f.watch.includes(e)).map((f) => f.id);
+    } else if (target.instance !== undefined) {
+      const k = target.instance;
       instances = all.filter((i) => i.key === k || i.heuristic === k);
       if (instances.length === 0) throw new Error(`no heuristic instance ${k}`);
       entities = [...new Set(instances.flatMap((i) => [...i.watch, ...i.actuates, ...i.uses]))].filter((e) => deps.scope.observes(e));
+      facts = [...new Set(instances.flatMap((i) => i.facts ?? []))];
+    } else {
+      // A fact: its changes, the facts and entities it reads, the decisions of its readers.
+      const f = allFacts.find((x) => x.id === target.fact);
+      if (f === undefined) throw new Error(`no fact ${target.fact}`);
+      entities = f.watch.filter((e) => deps.scope.observes(e));
+      instances = all.filter((i) => f.readers.includes(i.key));
+      facts = [f.id, ...f.facts];
     }
-    const owned = target.entity !== undefined ? new Set(entities) : new Set(instances.flatMap((i) => [...i.actuates, ...i.uses]));
+    const owned = target.entity !== undefined ? new Set(entities) : target.fact !== undefined ? new Set<string>() : new Set(instances.flatMap((i) => [...i.actuates, ...i.uses]));
     const inRange = (at: number) => at >= fromMs && at <= toMs;
     const by = await attribution(fromMs, toMs);
     const rows: TimelineRow[] = [];
@@ -568,6 +596,26 @@ export function createHouseRecord(deps: RecordDeps) {
       for (const d of foldDecisions(i.heuristic, journaled)) if (inRange(d.at)) rows.push({ kind: "decision", ...d, event_id: d.event_id ?? "" });
     }
 
+    // What the facts said: each change of value, with what caused it.
+    for (const id of facts) {
+      for (const r of readWindow({ category: FACT_CATEGORY, entityId: id }, fromMs, toMs)) {
+        const p = payload(r);
+        const at = rowTime(r);
+        if (p.tag !== "FactChanged" || !inRange(at)) continue;
+        const input = p["input"] as { kind: string; entity?: string; fact?: string } | undefined;
+        rows.push({
+          at,
+          kind: "fact",
+          fact: id,
+          value: p["value"],
+          ...(typeof p["why"] === "string" ? { why: p["why"] } : {}),
+          ...(input !== undefined ? { input: input.kind === "signal" ? `${input.entity ?? "?"} changed` : input.kind === "fact" ? `fact ${input.fact ?? "?"} changed` : input.kind } : {}),
+          event_id: r.envelope?.eventId ?? "",
+          ...(r.envelope?.causationId !== undefined ? { cause: r.envelope.causationId } : {}),
+        });
+      }
+    }
+
     // The pause stops every heuristic but the guards; config edits change what they do:
     // an edit that names the instances it touched shows for those only, one that does not
     // (a scope change, an old row) for all.
@@ -599,7 +647,7 @@ export function createHouseRecord(deps: RecordDeps) {
 export type HouseRecord = ReturnType<typeof createHouseRecord>;
 
 /**
- * GET api/timeline?entity=…|instance=…&from&to&limit&cursor&order: the same timeline
+ * GET api/timeline?entity=…|instance=…|fact=…&from&to&limit&cursor&order: the same timeline
  * for the panel, times in epoch ms, each cause as { by, instance?, event? }.
  */
 export function mountTimeline(app: Hono, record: HouseRecord): void {
@@ -614,10 +662,11 @@ export function mountTimeline(app: Hono, record: HouseRecord): void {
       const limit = Math.max(1, Math.min(Number(q("limit") ?? 100) || 100, 1000));
       const entity = q("entity");
       const instance = q("instance");
+      const fact = q("fact");
       const cursor = q("cursor");
       return c.json(
         await record.timeline(
-          { ...(entity !== undefined ? { entity } : {}), ...(instance !== undefined ? { instance } : {}) },
+          { ...(entity !== undefined ? { entity } : {}), ...(instance !== undefined ? { instance } : {}), ...(fact !== undefined ? { fact } : {}) },
           { fromMs, toMs, limit, order, ...(cursor !== undefined ? { cursor } : {}) },
         ),
       );

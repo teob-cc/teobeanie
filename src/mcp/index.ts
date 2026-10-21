@@ -1,11 +1,14 @@
 // index.ts — the MCP endpoint: POST /mcp (Streamable HTTP, stateless), behind the
-// access check in access.ts. Every tool call is journaled with its caller.
+// access checks in access.ts. One server, two doors: Home Assistant ingress on the main
+// port, and the agent port with an agent token (agents.ts). Every tool call is
+// journaled with its caller.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Hono } from "hono";
 import { createMCPToolRegistry, MCPToolResultFactory as Result, type MCPTool } from "@lambda-house/teob-ts/ai";
 import { createMCPServer, mcpHono } from "@lambda-house/teob-ts/mcp-server";
-import { checkAccess, networks, type Caller } from "./access.js";
+import { checkAccess, checkAgentAccess, networks, supervisorListed, type Caller } from "./access.js";
+import type { AgentTokens, FailureLimiter } from "./agents.js";
 import type { ToolCalled } from "./journal.js";
 
 const callers = new AsyncLocalStorage<Caller>();
@@ -24,9 +27,29 @@ export interface McpDeps {
 }
 
 type Peer = { env?: { incoming?: { socket?: { remoteAddress?: string } } } };
+type Ctx = Parameters<Parameters<Hono["use"]>[1]>[0];
 
+/** The agent port's door: the tokens and the failed-attempt limit. */
+export interface AgentDoor {
+  tokens: Pick<AgentTokens, "verify">;
+  limiter: FailureLimiter;
+}
+
+export interface Mcp {
+  /** /mcp through Home Assistant ingress (standalone: loopback). */
+  mountIngress(app: Hono): void;
+  /** /mcp on the agent port: a valid agent token from an allowed network. */
+  mountAgents(app: Hono, door: AgentDoor): void;
+}
+
+/** The ingress door alone (the main port's /mcp). */
 export function mountMcp(app: Hono, deps: McpDeps): void {
+  createMcp(deps).mountIngress(app);
+}
+
+export function createMcp(deps: McpDeps): Mcp {
   const allowed = networks(deps.networks);
+  const listed = supervisorListed(deps.networks);
   const registry = createMCPToolRegistry();
   for (const t of deps.tools) {
     registry.register({
@@ -59,15 +82,39 @@ export function mountMcp(app: Hono, deps: McpDeps): void {
     log: deps.log,
   });
 
-  const guard = async (c: Parameters<Parameters<Hono["use"]>[1]>[0], next: () => Promise<void>) => {
-    const access = checkAccess(deps.mode, (c as unknown as Peer).env?.incoming?.socket?.remoteAddress, (n) => c.req.header(n), allowed);
-    if (!access.ok) {
-      deps.log("warn", `mcp: refused ${c.req.method} ${c.req.path}: ${access.reason}`);
-      return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: `forbidden: ${access.reason}` } }, 403);
-    }
-    await callers.run(access.caller, next);
+  const peer = (c: Ctx): string | undefined => (c as unknown as Peer).env?.incoming?.socket?.remoteAddress;
+  const mount = (app: Hono, guard: (c: Ctx, next: () => Promise<void>) => Promise<Response | void>): void => {
+    app.use("/mcp", guard);
+    app.use("/mcp/*", guard);
+    app.route("/mcp", mcpHono(server));
   };
-  app.use("/mcp", guard);
-  app.use("/mcp/*", guard);
-  app.route("/mcp", mcpHono(server));
+
+  return {
+    mountIngress(app) {
+      mount(app, async (c, next) => {
+        const access = checkAccess(deps.mode, peer(c), (n) => c.req.header(n), allowed);
+        if (!access.ok) {
+          deps.log("warn", `mcp: refused ${c.req.method} ${c.req.path}: ${access.reason}`);
+          return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: `forbidden: ${access.reason}` } }, 403);
+        }
+        await callers.run(access.caller, next);
+      });
+    },
+    mountAgents(app, door) {
+      // Said once in the log at warn, then at debug: every request from a hidden client is refused alike.
+      let hiddenWarned = false;
+      mount(app, async (c, next) => {
+        const access = checkAgentAccess(peer(c), c.req.header("authorization"), allowed, door.tokens, door.limiter, listed);
+        if (!access.ok) {
+          const level = access.hidden && hiddenWarned ? "debug" : "warn";
+          if (access.hidden) hiddenWarned = true;
+          deps.log(level, `mcp (agent port): refused ${c.req.method} ${c.req.path}: ${access.reason}`);
+          const message = access.status === 401 ? `unauthorized: ${access.reason}` : access.status === 429 ? `too many attempts: ${access.reason}` : `forbidden: ${access.reason}`;
+          const headers: Record<string, string> = access.status === 401 ? { "www-authenticate": 'Bearer realm="teobeanie"' } : {};
+          return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } }, access.status, headers);
+        }
+        await callers.run(access.caller, next);
+      });
+    },
+  };
 }

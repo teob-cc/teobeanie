@@ -9,7 +9,7 @@ const ENERGY_MS = 5 * 60_000;
 /**
  * The House view: GET api/house once (and on every SSE reconnect, which reconciles
  * anything missed, and after a config reload), then "house" frames patch the entities'
- * states in place and replace the instances' cards when they changed.
+ * states in place and replace the instances' cards and the facts when they changed.
  */
 export function useHouse(
   subscribe: (fn: (f: SseFrame) => void) => () => void,
@@ -51,8 +51,9 @@ export function useHouse(
         setLastFrameAt(frame.at);
         setView((prev) => {
           if (prev === null) return prev;
-          // The cards come whole, when any changed.
+          // The cards and the facts come whole, when any changed.
           const cards = frame.cards ?? prev.cards;
+          const facts = frame.facts ?? prev.facts;
           let entities: HouseView["entities"] | undefined;
           for (const [id, s] of Object.entries(frame.states)) {
             const e = prev.entities[id];
@@ -60,8 +61,8 @@ export function useHouse(
             entities ??= { ...prev.entities };
             entities[id] = { ...e, ...s };
           }
-          if (entities === undefined && cards === prev.cards) return prev;
-          return { ...prev, cards, ...(entities !== undefined ? { entities } : {}) };
+          if (entities === undefined && cards === prev.cards && facts === prev.facts) return prev;
+          return { ...prev, cards, facts, ...(entities !== undefined ? { entities } : {}) };
         });
       }),
     [subscribe, reload],

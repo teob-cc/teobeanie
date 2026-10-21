@@ -18,7 +18,7 @@ this `examples/` directory into the config folder on first start.
 | Example | Shows |
 |---|---|
 | [`starter/`](starter) | One instance of most starter packages: motion lights (including stairs with two sensors, and a porch light that only switches on in the dark), door reminders, a visitor notice, leak shutoff, a circulation pump with run-on, coffee-machine auto-off with a morning keep-on window and an MQTT remote, a thermostat setpoint applied when heating starts, a garage door opened and closed by command through a momentary relay, a blinds remote, and the outdoor sources. |
-| [`rules/`](rules) | Desired-state rules in TypeScript: a hallway light that is dimmer at night and switches off 5 minutes after the last motion, and a circulation pump with a 20-minute run-on. |
+| [`rules/`](rules) | Desired-state rules in TypeScript: a hallway light that is dimmer at night and switches off 5 minutes after the last motion, and a circulation pump with a 20-minute run-on. Two facts (derived state with a value and a since): "nobody in the hallway for 15 minutes", and "the boiler heats while nobody is about", which reads the first. |
 | [`custom-heuristic/`](custom-heuristic) | A heuristic written as code in the config folder: "the washing machine is done", detected from its power draw, used for two appliances. |
 
 `starter/` is what `node dist/studio/cli.js init <folder>` writes (plus typings for its

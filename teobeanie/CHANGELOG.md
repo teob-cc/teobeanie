@@ -4,11 +4,43 @@
 
 - **Revisions and rollback.** Every applied change to the config folder is a numbered
   revision, its files kept under `/data/revisions`; the Heuristics tab lists them with
-  who and what, shows a diff, and rolls back to any of them (a revision itself). The
-  file watch now also reloads on changes in `heuristics/`, `packages/` and the lock.
+  who and what, shows a diff, and rolls back to any of them (a revision itself). Facts
+  come back with their files and are evaluated again. The file watch now also reloads
+  on changes in `heuristics/`, `packages/` and the lock.
 - **Shadow twins.** `"twinOf"` runs a new version of an instance beside it in shadow,
-  on the same inputs; the panel shows where their decisions differ, and Promote swaps
+  on the same inputs and facts; the panel shows where their decisions differ (per
+  signal and per fact change), and Promote swaps
   them in one revision.
+- **Explore Home Assistant over MCP.** New read-only tools read all of Home Assistant
+  through Teobeanie, outside the house scope too: `ha_registry` (areas, devices,
+  entities), `ha_states`, `ha_history` (at most 7 days a call) and `ha_services`.
+  Nothing they read is recorded, only the call. Home Assistant's own MCP server is not
+  needed. `suggest` names the behaviour packages whose roles your entities fill, with
+  the instance's entities bound, the same area's first. `house_state` also returns the
+  instances' cards. The onboard skill uses these tools instead of Home Assistant's REST
+  API.
+- **Connect an agent from the panel.** The add-on opens an agent port (8199) that
+  serves the MCP tools and nothing else. Mint a token for each agent on the panel's new
+  **Connect** page, paste the `claude mcp add --transport http …` line it shows, and
+  revoke the token when the agent should stop. Tokens are kept as salted hashes, and
+  minting, revoking and every tool call are journaled with the token's name. No Home
+  Assistant token or bridge is needed to connect any more; the bridge through ingress
+  stays as the fallback. The port can be moved or closed in the add-on's Network
+  section.
+- **The agent port refuses a hidden client.** When the host's port mapping shows every
+  client as the Supervisor network's gateway (172.30.32.1, inside the default
+  172.16.0.0/12), the agent port refuses it with a 403 that says why, and logs it once.
+  Use the bridge through ingress, or list `172.30.32.0/23` in `mcp_networks` on purpose.
+- **Facts: derived state.** `fact(id, ({ ha, held, within, between, sun, outdoor }) => value)`
+  says once what several behaviours need ("nobody near the garage for 5 minutes"), with a
+  value and a since. Facts live in packages and in `heuristics/*.ts`, may read other facts
+  (a cycle is refused), are journaled only when the value changes (`FactChanged` in
+  `teob-fact/<id>`, caused by the signal or the hold behind it) and are typed in
+  `ha.d.ts`. Rules read `ha.facts.<name>`, deciders `ctx.fact(id)` with the fact declared
+  in `facts`, and `simulate()` runs facts alongside (`sim.fact(id)`). The House page lists
+  them with their timelines; `api/facts`, `api/house`, `api/timeline?fact=`, and the MCP
+  `house_state` and `timeline` tools show them. door-watch's `door-nag` takes
+  `onlyWhileFact`: remind only while a fact such as `nobody-near-garage` holds.
 
 ## 0.2.0 — first public alpha
 

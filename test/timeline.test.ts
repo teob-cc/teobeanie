@@ -202,7 +202,7 @@ describe("timeline", () => {
     const porch = await record.timeline({ instance: "occupancy-light/porch" }, evening);
     expect(porch.rows.filter((r) => r.kind === "decision").map(brief)).toEqual(["decision occupancy-light/porch porch motion [shadow: not sent]"]);
     await expect(record.timeline({ instance: "door-nag/front" }, evening)).rejects.toThrow(/no heuristic instance/);
-    await expect(record.timeline({}, evening)).rejects.toThrow(/either entity or instance/);
+    await expect(record.timeline({}, evening)).rejects.toThrow(/one of entity, instance or fact/);
   });
 
   it("is bounded: limit and a cursor page through the same rows, in either order", async () => {
@@ -247,6 +247,40 @@ describe("timeline", () => {
     ]);
     expect(typeof body.more).toBe("string");
     expect((await app.request("/api/timeline?entity=camera.garden")).status).toBe(400);
+  });
+});
+
+describe("facts in the timeline", () => {
+  // 15:20 the hall empties: the fact hall-empty turns true five minutes later.
+  const f1 = write("teob-fact", "hall-empty", T0 + 25 * MIN, { tag: "FactChanged", fact: "hall-empty", value: true, since: T0 + 25 * MIN, inputs: { "binary_sensor.hall_motion": false }, why: "hall_motion is off for 5 min", input: { kind: "time" } }, d2);
+  write("teob-fact", "hall-empty", T0 + 26 * MIN, { tag: "FactTracked", fact: "hall-empty", set: {}, clear: ["x"] });
+  const hallEmpty = { id: "hall-empty", title: "Hall empty", value: true, known: true, since: T0 + 25 * MIN, watch: ["binary_sensor.hall_motion"], facts: [], readers: ["occupancy-light/hall"] };
+  const withFacts = { ...deps, instances: () => [{ ...instance("hall"), facts: ["hall-empty"] }, instance("porch")], facts: () => [hallEmpty] };
+  const rec = createHouseRecord(withFacts);
+  const factTools = createHouseTools({ ...withFacts, liveState: () => undefined, ha: { send: async () => [] as never }, configDir: dir, caller: () => undefined });
+
+  it("a fact's changes show in its own timeline, its entities' and its readers', with the cause", async () => {
+    const own = await rec.timeline({ fact: "hall-empty" }, evening);
+    expect(own.rows.filter((r) => r.kind === "fact")).toEqual([
+      { at: T0 + 25 * MIN, kind: "fact", fact: "hall-empty", value: true, why: "hall_motion is off for 5 min", input: "time", event_id: f1, cause: d2 },
+    ]);
+    // Its reader's decisions and the entity it reads come along.
+    expect(own.rows.some((r) => r.kind === "decision" && r.instance === "occupancy-light/hall")).toBe(true);
+    expect(own.rows.some((r) => r.kind === "change" && r.entity === "binary_sensor.hall_motion")).toBe(true);
+    for (const target of [{ entity: "binary_sensor.hall_motion" }, { instance: "occupancy-light/hall" }]) {
+      expect((await rec.timeline(target, evening)).rows.filter((r) => r.kind === "fact").map((r) => r.event_id)).toEqual([f1]);
+    }
+    expect((await rec.timeline({ instance: "occupancy-light/porch" }, evening)).rows.some((r) => r.kind === "fact")).toBe(false);
+    await expect(rec.timeline({ fact: "nope" }, evening)).rejects.toThrow(/no fact nope/);
+  });
+
+  it("house_state lists the facts with value and since; the chain reads a FactChanged", async () => {
+    const r = await factTools.find((t) => t.name === "house_state")!.execute({});
+    expect(r.success && (r.output as { facts: unknown }).facts).toEqual([
+      { id: "hall-empty", title: "Hall empty", value: true, since: "2026-10-12 15:25:00", reads: ["binary_sensor.hall_motion"], read_by: ["occupancy-light/hall"] },
+    ]);
+    const c = await rec.chain(f1, (ms) => new Date(ms).toISOString());
+    expect(c.hops.map((h) => h.summary)).toEqual(["hall-empty → true (hall_motion is off for 5 min)", "binary_sensor.hall_motion → off: hall vacant, off in 5 min"]);
   });
 });
 

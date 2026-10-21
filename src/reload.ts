@@ -22,6 +22,7 @@ import type { GroupsConfig } from "./house/layout.js";
 import { loadInstances, type HeuristicHost, type InstanceConfig, type InstanceInfo, type PreparedReload, type ReloadChanges } from "./kernel/host.js";
 import { loadLibrary, type HeuristicSource, type PackageInfo } from "./packages/library.js";
 import type { AnyHeuristic } from "./kernel/heuristic.js";
+import type { AnyFact } from "./kernel/fact.js";
 import { mayWrite } from "./studio/files.js";
 import { requestUser } from "./pause.js";
 import { changedFiles, configFingerprint, describeChanges, type ConfigChange } from "./working-set.js";
@@ -47,6 +48,9 @@ export interface ConfigFiles {
   packages: PackageInfo[];
   /** Per heuristic id, its file and package. */
   sources: Map<string, HeuristicSource>;
+  /** The facts the packages and the house's files define, and where each is. */
+  facts: AnyFact[];
+  factSources: Map<string, HeuristicSource>;
   instances: InstanceConfig[];
 }
 
@@ -62,7 +66,7 @@ export async function readConfig(configDir: string, log: Log, extra: AnyHeuristi
   const lib = await loadLibrary(configDir, teobLog, failures, { taken: extra });
   if (failures.length > 0) throw new Error(failures.join("; "));
   const instances = loadInstances(configDir, teobLog);
-  return { allowlist, tiles, groups, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, instances };
+  return { allowlist, tiles, groups, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
 }
 
 /**
@@ -81,6 +85,7 @@ export async function applyConfig(deps: {
   const next = await readConfig(deps.configDir, deps.log, deps.extra);
   const prepared = deps.host.prepare({
     library: next.library,
+    facts: next.facts,
     instances: next.instances,
     scope: next.allowlist.scope,
     house: next.allowlist.house,

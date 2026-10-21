@@ -61,6 +61,8 @@ export interface Decision {
     value?: unknown;
     state?: string;
     timer?: string;
+    /** A fact input: the fact that changed. */
+    fact?: string;
     trigger?: string;
     actionId?: string;
     ok?: boolean;
@@ -259,6 +261,8 @@ export function describeInput(i: Decision["input"]): string {
       return `${i.entity} → ${i.state ?? String(i.value)}`;
     case "timer":
       return `timer “${i.timer}” fired`;
+    case "fact":
+      return `fact ${i.fact ?? "?"}${i.value !== undefined ? ` → ${String(i.value)}` : ""}`;
     case "trigger":
       return `trigger “${i.trigger}”`;
     case "outcome":

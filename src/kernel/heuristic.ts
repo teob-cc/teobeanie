@@ -9,6 +9,7 @@
 // decisions.
 
 import type { Schema } from "./params.js";
+import type { FactId, FactValueOf } from "./rule.js";
 
 export type Value = number | string | boolean | null;
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -41,6 +42,8 @@ export type Input =
     }
   /** A timer this instance set came due. */
   | { kind: "timer"; at: number; timer: string; data?: Json }
+  /** A fact this instance reads (HeuristicDef.facts) changed: its new value, since when, and the FactChanged event. */
+  | { kind: "fact"; at: number; fact: string; value: Json; since: number; eventId: string }
   /** A declared HA trigger (time, sun, ...) fired. */
   | { kind: "trigger"; at: number; trigger: string; data: Record<string, unknown> }
   /** An action this instance requested completed (active mode only). */
@@ -159,6 +162,12 @@ export interface DecideCtx<P> {
   value(entity: string): Value | undefined;
   /** Due time of a pending timer of this instance, if any. */
   timer(id: string): number | undefined;
+  /**
+   * A fact's value and since when it holds (by id, or its camelCase or snake_case name);
+   * undefined while it has none. Declare the facts a heuristic reads (HeuristicDef.facts):
+   * their changes come as fact inputs. Every read is journaled with the decision.
+   */
+  fact<Id extends FactId>(id: Id): { value: FactValueOf<Id>; since: number } | undefined;
   /** Facts about the house: where its outdoor conditions come from, its time zone. */
   readonly house: HouseFacts;
 }
@@ -233,6 +242,8 @@ export interface HeuristicDef<P, S, E extends { tag: string }> {
   watch(params: P): string[];
   /** Entities decide() may ctx.get() without being woken by them. */
   reads?(params: P): string[];
+  /** Facts (fact ids) decide() reads with ctx.fact(): each change is delivered as a fact input. */
+  facts?(params: P): string[];
   /** Entities this heuristic may actuate — its ownership claim in the SafeActuator. */
   actuates(params: P): string[];
   /** Owned entities other instances may operate too (declaring them in uses): a momentary relay others press. */

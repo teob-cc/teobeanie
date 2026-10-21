@@ -5,6 +5,7 @@
 
 import { transform } from "sucrase";
 import * as toolkit from "../../../src/toolkit";
+import { isFact, type AnyFact } from "../../../src/kernel/fact";
 import type { AnyHeuristic } from "../../../src/kernel/heuristic";
 import { createTestApi } from "./test-api";
 import type { LoadResult, LoadedHeuristic, RunRequest, RunResult, TestResult } from "./protocol";
@@ -41,20 +42,22 @@ function run(files: Record<string, string>): RunResult {
     return module.exports;
   };
 
-  // The add-on's loader: a definition, an array, or a function of the toolkit.
-  const definitions = (exports: Record<string, unknown>): AnyHeuristic[] => {
+  // The add-on's loader: a definition, a fact, an array, or a function of the toolkit.
+  const definitions = (exports: Record<string, unknown>): Array<AnyHeuristic | AnyFact> => {
     const d = exports["default"];
     const v = typeof d === "function" ? (d as (t: typeof toolkit) => unknown)(toolkit) : d;
-    const list = (Array.isArray(v) ? v : [v]) as AnyHeuristic[];
+    const list = (Array.isArray(v) ? v : [v]) as Array<AnyHeuristic | AnyFact>;
     for (const h of list) {
+      if (isFact(h)) continue;
       if (typeof h !== "object" || h === null || typeof h.id !== "string" || typeof h.decide !== "function") {
-        throw new Error("the default export is not a rule or heuristic definition");
+        throw new Error("the default export is not a rule, a heuristic definition or a fact");
       }
     }
     return list;
   };
 
-  const describe = (h: AnyHeuristic): LoadedHeuristic => {
+  const describe = (h: AnyHeuristic | AnyFact): LoadedHeuristic => {
+    if (isFact(h)) return { id: h.id, kind: "fact", owns: [], watches: h.watch() };
     const base = { id: h.id, kind: h.kind === "rule" ? ("rule" as const) : ("decider" as const) };
     try {
       return { ...base, owns: h.actuates({}), watches: h.watch({}) };

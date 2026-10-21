@@ -36,6 +36,12 @@ declare global {
    */
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface TeobOperable {}
+  /**
+   * Fact id → the type of its value. Empty here; the generated ha.d.ts fills it in from
+   * the facts the config folder defines (fact.ts).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface TeobFacts {}
 }
 
 type Known = keyof TeobHouse & string;
@@ -131,10 +137,34 @@ export interface Entity<Id extends string = string> {
 type DomainOf<Id> = Id extends `${infer D}.${string}` ? D : never;
 type ObjectIdOf<Id, D extends string> = Id extends `${D}.${infer O}` ? O : never;
 
-/** ha.light.hallway → the Entity "light.hallway". A misspelled id is a type error. */
-export type Ha = [Known] extends [never]
+/** A handle on one fact (fact.ts). Reading it records the read. */
+export interface Fact<T = Json> {
+  /** The name it was read by: the fact's id, or its camelCase or snake_case form. */
+  readonly id: string;
+  /** Its value now; undefined while it has none (unknown, or left out by the loader). */
+  readonly value: T | undefined;
+  /** When it took this value, ms epoch (0 when unknown). */
+  readonly since: number;
+  is(...values: T[]): boolean;
+  toString(): string;
+}
+
+type KnownFact = keyof TeobFacts & string;
+type CamelOf<S extends string> = S extends `${infer H}-${infer R}` ? `${H}${Capitalize<CamelOf<R>>}` : S;
+type SnakeOf<S extends string> = S extends `${infer H}-${infer R}` ? `${H}_${SnakeOf<R>}` : S;
+/** A fact id of this house (any string while it has no typed facts). */
+export type FactId = [KnownFact] extends [never] ? string : KnownFact;
+/** The type of a fact's value: from ha.d.ts, else any JSON value. */
+export type FactValueOf<Id extends string> = Id extends KnownFact ? TeobFacts[Id] : Json;
+/** ha.facts.<id>: each fact by its camelCase and its snake_case name. */
+export type Facts = [KnownFact] extends [never]
+  ? Record<string, Fact>
+  : { readonly [K in KnownFact as CamelOf<K> | SnakeOf<K>]: Fact<TeobFacts[K]> };
+
+/** ha.light.hallway → the Entity "light.hallway"; ha.facts.<name> → a fact. A misspelled id is a type error. */
+export type Ha = ([Known] extends [never]
   ? Record<string, Record<string, Entity>>
-  : { readonly [D in DomainOf<Known>]: { readonly [O in ObjectIdOf<Known, D>]: Entity<`${D}.${O}`> } };
+  : { readonly [D in DomainOf<Known>]: { readonly [O in ObjectIdOf<Known, D>]: Entity<`${D}.${O}`> } }) & { readonly facts: Facts };
 
 export interface Sun {
   readonly belowHorizon: boolean;
@@ -195,7 +225,8 @@ export type RuleFn<P> = (w: World, params: P) => Want | ReadonlyArray<Want | und
 
 // ---- journal shapes ----
 
-interface Track {
+/** held/within bookkeeping: whether a condition holds, and since when it did or did not. */
+export interface Track {
   on: boolean;
   at: number;
 }
@@ -226,15 +257,25 @@ export const EVAL = "eval";
 
 // ---- entity handles ----
 
-/** What an evaluation sees and records. */
-interface Scope {
+/** A fact as a decision reads it: its value and since when it holds. */
+export interface FactReading {
+  value: Json;
+  since: number;
+}
+
+/** What an evaluation (of a rule or a fact) sees and records. */
+export interface Scope {
   now: number;
   house: HouseFacts;
   get(id: string): Observed | undefined;
+  /** A fact by id or name; undefined when it has no value. */
+  fact(name: string): FactReading | undefined;
   /** Predicate results in evaluation order: the branch the rule took. */
   trace: string[];
   /** Entities read (in order of first read). */
   reads: Set<string>;
+  /** Facts read, by the name they were read with. */
+  factReads: Set<string>;
   /** Earliest future time a time condition can flip. */
   wakes: number[];
   track: Record<string, Track>;
@@ -282,6 +323,35 @@ function entityHandle(scope: () => Scope, id: string): Entity<string> {
   };
 }
 
+/** A fact's name as kebab-case, for a reason: nobodyNear and nobody_near read "nobody-near". */
+export const factLabel = (name: string): string => name.replace(/_/g, "-").replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+
+const fmtJson = (v: Json | undefined): string => (typeof v === "string" ? v : JSON.stringify(v ?? null));
+
+function factHandle(scope: () => Scope, name: string): Fact {
+  const read = (): FactReading | undefined => {
+    const s = scope();
+    s.factReads.add(name);
+    return s.fact(name);
+  };
+  return {
+    id: name,
+    get value() {
+      return read()?.value;
+    },
+    get since() {
+      return read()?.since ?? 0;
+    },
+    is: (...values) => {
+      const r = read();
+      const ok = r !== undefined && values.some((v) => sameJson(v, r.value));
+      scope().trace.push(`${factLabel(name)} is ${values.map(fmtJson).join("|")}${ok ? "" : " ✗"}`);
+      return ok;
+    },
+    toString: () => name,
+  };
+}
+
 const ENTITY_ID = /^[a-z_]+\.[a-z0-9_]+$/;
 
 function haProxy(scope: () => Scope): { ha: Ha; entity: (id: string) => Entity } {
@@ -293,9 +363,19 @@ function haProxy(scope: () => Scope): { ha: Ha; entity: (id: string) => Entity }
     return h;
   };
   const domains = new Map<string, Record<string, Entity>>();
+  const factHandles = new Map<string, Fact>();
+  const facts = new Proxy({} as Record<string, Fact>, {
+    get(_t, name) {
+      if (typeof name !== "string") return undefined;
+      let h = factHandles.get(name);
+      if (h === undefined) factHandles.set(name, (h = factHandle(scope, name)));
+      return h;
+    },
+  });
   const ha = new Proxy({} as Ha, {
     get(_t, domain) {
       if (typeof domain !== "string") return undefined;
+      if (domain === "facts") return facts;
       let d = domains.get(domain);
       if (d === undefined) {
         d = new Proxy({} as Record<string, Entity>, {
@@ -312,8 +392,16 @@ function haProxy(scope: () => Scope): { ha: Ha; entity: (id: string) => Entity }
 /** Entity ids written as ha.domain.object_id or ha.domain["object_id"] in a rule's source. */
 export function entitiesInSource(src: string): string[] {
   const out = new Set<string>();
-  for (const m of src.matchAll(/\bha\.([a-z_]+)\.([a-z0-9_]+)\b/g)) out.add(`${m[1]}.${m[2]}`);
-  for (const m of src.matchAll(/\bha\.([a-z_]+)\[\s*["']([a-z0-9_]+)["']\s*\]/g)) out.add(`${m[1]}.${m[2]}`);
+  for (const m of src.matchAll(/\bha\.([a-z_]+)\.([a-z0-9_]+)\b/g)) if (m[1] !== "facts") out.add(`${m[1]}.${m[2]}`);
+  for (const m of src.matchAll(/\bha\.([a-z_]+)\[\s*["']([a-z0-9_]+)["']\s*\]/g)) if (m[1] !== "facts") out.add(`${m[1]}.${m[2]}`);
+  return [...out];
+}
+
+/** Fact names written as ha.facts.name or ha.facts["name"] in a rule's or a fact's source. */
+export function factsInSource(src: string): string[] {
+  const out = new Set<string>();
+  for (const m of src.matchAll(/\bha\.facts\.([A-Za-z_][A-Za-z0-9_]*)/g)) out.add(m[1]!);
+  for (const m of src.matchAll(/\bha\.facts\[\s*["']([A-Za-z0-9_-]+)["']\s*\]/g)) out.add(m[1]!);
   return [...out];
 }
 
@@ -341,10 +429,16 @@ function sub(s: Scope, cond: () => boolean): { value: boolean; label: string; ch
   const inner: string[] = [];
   s.trace = inner;
   const readsHere = new Set<string>();
+  const factsHere = new Set<string>();
   const get = s.get;
+  const fact = s.fact;
   s.get = (id) => {
     readsHere.add(id);
     return get(id);
+  };
+  s.fact = (name) => {
+    factsHere.add(name);
+    return fact(name);
   };
   let value: boolean;
   try {
@@ -352,10 +446,12 @@ function sub(s: Scope, cond: () => boolean): { value: boolean; label: string; ch
   } finally {
     s.trace = outer;
     s.get = get;
+    s.fact = fact;
   }
+  const facts = [...factsHere].sort();
   const ids = [...readsHere].sort();
-  const changedAt = Math.min(s.now, Math.max(0, ...ids.map((id) => get(id)?.since ?? 0)));
-  return { value, label: inner.map(asFact).join(" & ") || "condition", changedAt, key: hash(`${cond.toString()}|${ids.join(",")}`) };
+  const changedAt = Math.min(s.now, Math.max(0, ...ids.map((id) => get(id)?.since ?? 0), ...facts.map((f) => fact(f)?.since ?? 0)));
+  return { value, label: inner.map(asFact).join(" & ") || "condition", changedAt, key: hash(`${cond.toString()}|${[...ids, ...facts.map((f) => `fact:${f}`)].join(",")}`) };
 }
 
 /**
@@ -570,14 +666,13 @@ function asRuleState(state: unknown): RuleState {
 
 // ---- rule() → HeuristicDef ----
 
-export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> = {}): AnyHeuristic {
-  let current: Scope | undefined;
-  const scope = (): Scope => {
-    if (current === undefined) throw new Error(`rule ${id}: entities can only be read while the rule evaluates`);
-    return current;
-  };
+/**
+ * The World a rule or a fact is evaluated against, reading through `scope()`: the
+ * scope of the evaluation running now (an error outside one).
+ */
+export function createWorld(scope: () => Scope): World {
   const { ha, entity } = haProxy(scope);
-  const world: World = {
+  return {
     ha,
     entity: entity as World["entity"],
     held: (cond, ms) => held(scope(), cond, ms),
@@ -614,9 +709,36 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
     },
     keep,
   };
+}
 
-  const evaluate = (params: P, now: number, get: Scope["get"], track: Record<string, Track>, house: HouseFacts = {}) => {
-    const s: Scope = { now, house, get, trace: [], reads: new Set(), wakes: [], track, touched: new Map() };
+/** A fresh evaluation scope. */
+export function newScope(now: number, house: HouseFacts, get: Scope["get"], fact: Scope["fact"], track: Record<string, Track>): Scope {
+  return { now, house, get, fact, trace: [], reads: new Set(), factReads: new Set(), wakes: [], track, touched: new Map() };
+}
+
+/** held/within bookkeeping after an evaluation: touched conditions update, untouched ones are forgotten. */
+export function trackChanges(track: Record<string, Track>, touched: Scope["touched"]): { set: Record<string, Track>; clear: string[] } {
+  const set: Record<string, Track> = {};
+  const clear: string[] = [];
+  for (const [k, t] of touched) {
+    if (t === null) {
+      if (track[k] !== undefined) clear.push(k);
+    } else if (!sameJson(track[k] as unknown as Json, t as unknown as Json)) set[k] = t;
+  }
+  for (const k of Object.keys(track)) if (!touched.has(k)) clear.push(k);
+  return { set, clear };
+}
+
+export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> = {}): AnyHeuristic {
+  let current: Scope | undefined;
+  const scope = (): Scope => {
+    if (current === undefined) throw new Error(`rule ${id}: entities can only be read while the rule evaluates`);
+    return current;
+  };
+  const world = createWorld(scope);
+
+  const evaluate = (params: P, now: number, get: Scope["get"], track: Record<string, Track>, house: HouseFacts = {}, fact: Scope["fact"] = () => undefined) => {
+    const s = newScope(now, house, get, fact, track);
     current = s;
     try {
       return { result: fn(world, params), scope: s };
@@ -626,18 +748,19 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
   };
 
   // A first evaluation over an empty house tells which entities the rule sets and reads.
-  const probes = new Map<unknown, { owns: string[]; reads: string[] }>();
+  const probes = new Map<unknown, { owns: string[]; reads: string[]; facts: string[] }>();
   const probe = (params: P) => {
     let p = probes.get(params);
     if (p === undefined) {
       const { result, scope: s } = evaluate(params, 0, () => undefined, {});
-      p = { owns: wantsOf(id, result).map(([e]) => e), reads: [...s.reads] };
+      p = { owns: wantsOf(id, result).map(([e]) => e), reads: [...s.reads], facts: [...s.factReads] };
       probes.set(params, p);
     }
     return p;
   };
   const source = fn.toString();
   const sourceIds = entitiesInSource(source);
+  const sourceFacts = factsInSource(source);
   const usesOutdoor = /\boutdoor\b/.test(source);
   const enforcing = (params: P): { graceMs: number; yieldToUsers: boolean } | undefined => {
     const e = opts.enforce?.(params);
@@ -668,6 +791,8 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
     ...(opts.guarantees !== undefined ? { guarantees: opts.guarantees } : {}),
     ...(opts.params !== undefined ? { params: opts.params } : {}),
     watch: watchOf,
+    // Facts read: woken by their changes as by a watched entity's.
+    facts: (params: P) => [...new Set([...sourceFacts, ...probe(params).facts])],
     actuates: owns,
     ...(opts.view !== undefined ? { view: (state: RuleState, ctx: ViewCtx<P>) => opts.view!({ desired: asRuleState(state).desired }, ctx) } : {}),
     initial: (): RuleState => ({ desired: {}, track: {}, unwatched: [] }),
@@ -675,7 +800,7 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
     decide(recovered: RuleState, input, ctx: DecideCtx<P>): Decision<RuleEvent> | undefined {
       if (input.kind === "outcome") return undefined;
       const state = asRuleState(recovered);
-      const { result, scope: s } = evaluate(ctx.params, ctx.now, (e) => ctx.get(e), state.track, ctx.house);
+      const { result, scope: s } = evaluate(ctx.params, ctx.now, (e) => ctx.get(e), state.track, ctx.house, (name) => (ctx.fact as (n: string) => FactReading | undefined)(name));
       const enforce = enforcing(ctx.params);
 
       const events: RuleEvent[] = [];
@@ -734,14 +859,7 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
       }
 
       // held/within bookkeeping: touched conditions update, untouched ones are forgotten.
-      const set: Record<string, Track> = {};
-      const clear: string[] = [];
-      for (const [k, t] of s.touched) {
-        if (t === null) {
-          if (state.track[k] !== undefined) clear.push(k);
-        } else if (!sameJson(state.track[k] as unknown as Json, t as unknown as Json)) set[k] = t;
-      }
-      for (const k of Object.keys(state.track)) if (!s.touched.has(k)) clear.push(k);
+      const { set, clear } = trackChanges(state.track, s.touched);
       if (Object.keys(set).length > 0 || clear.length > 0) events.push({ tag: "Tracked", set, clear });
 
       const watched = new Set([...watchOf(ctx.params), ...(usesOutdoor ? outdoorEntities(ctx.house.outdoor) : [])]);

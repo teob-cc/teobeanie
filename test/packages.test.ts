@@ -122,7 +122,7 @@ describe("roles and manifests", () => {
 
   it("a manifest names the folder, a version, a platform range and its heuristics, and nothing unknown", () => {
     expect(manifestProblems({ name: "Bad Name", version: "1", platform: "soon", title: "", heuristics: {}, colour: "red" }, "bad")).toEqual([
-      "colour: unknown, expected one of name, version, platform, title, description, pattern, main, heuristics",
+      "colour: unknown, expected one of name, version, platform, title, description, pattern, main, heuristics, facts",
       "name: expected a kebab-case name",
       'version: expected "major.minor.patch"',
       'platform: expected a version range of the "teobeanie" module, e.g. ">=0.2.0 <1.0.0"',

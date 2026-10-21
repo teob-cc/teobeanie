@@ -6,7 +6,8 @@ export interface RunRequest {
 
 export interface LoadedHeuristic {
   id: string;
-  kind: "rule" | "decider";
+  /** A fact (derived state): watches are what it reads, owns is empty. */
+  kind: "rule" | "decider" | "fact";
   owns: string[] | null;
   watches: string[] | null;
   /** Why owns/watches are unknown: a heuristic that needs params from heuristics.json. */

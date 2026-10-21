@@ -43,19 +43,23 @@ import { noderedTimeline } from "./projections.js";
 import { buildTiles, checkTileCoverage, loadHouseConfig } from "./tiles.js";
 import { createHouseService, type HouseConfig } from "./house/service.js";
 import { applyConfig, createReloader, watchConfig } from "./reload.js";
-import { startServer, type HealthReport } from "./server.js";
-import { installStarter, loadLibrary, type PackageInfo } from "./packages/library.js";
+import { startAgentServer, startServer, type HealthReport } from "./server.js";
+import { installStarter, loadLibrary, starterPackages, type PackageInfo } from "./packages/library.js";
 import { createSafeActuator, createTelegramNotifier } from "./kernel/actuator.js";
 import { createTelegramReceiver } from "./telegram.js";
 import { createHeuristicHost, loadInstances, seedConfigExamples } from "./kernel/host.js";
 import { createDeviceResolver } from "./devices.js";
 import { createMonitor, type Monitor } from "./monitor.js";
 import { houseZone, isTimeZone } from "./kernel/clock.js";
-import { currentCaller, mountMcp } from "./mcp/index.js";
+import { createMcp, currentCaller } from "./mcp/index.js";
 import { mcpNetworks as resolveMcpNetworks, networks } from "./mcp/access.js";
 import { MCP_CATEGORY, MCP_ENTITY, mcpAuditAggregate, mcpEventCodec, mcpStateCodec, type McpCommand } from "./mcp/journal.js";
 import { INSTRUCTIONS, createHouseTools } from "./mcp/tools.js";
+import { createHaTools } from "./mcp/ha-tools.js";
+import { createHaRegistry } from "./ha-registry.js";
 import { createHouseRecord } from "./mcp/timeline.js";
+import { AGENT_PORT, accessAggregate, accessEventCodec, accessStateCodec, createAccessJournal, createAgentTokens, createFailureLimiter } from "./mcp/agents.js";
+import { supervisorPort, type AgentPortInfo } from "./connect.js";
 import { createPauseControl, pauseAggregate, pauseEventCodec, pauseStateCodec } from "./pause.js";
 import { configAggregate, configEventCodec, configStateCodec, createConfigJournal } from "./working-set.js";
 import { createRevisionStore, recordBootRevision } from "./revisions.js";
@@ -144,10 +148,15 @@ let bridgeRef: HaBridge | undefined;
 const loadedLibrary = await loadLibrary(config.configDir, haLog);
 let library = loadedLibrary.heuristics;
 let packages: PackageInfo[] = loadedLibrary.packages;
-// The House view (step 9b) follows the instances' cards; it exists only after the host.
+// The facts (derived state, kernel/fact.ts) and the files they come from.
+let libraryFacts = loadedLibrary.facts;
+let factSources = loadedLibrary.factSources;
+// The House view (step 9b) follows the instances' cards and the facts; it exists only after the host.
 let cardsChanged = (): void => {};
+let factsChanged = (): void => {};
 const heuristics = createHeuristicHost({
   library,
+  facts: loadedLibrary.facts,
   instances: loadInstances(config.configDir, haLog),
   actuator,
   liveState: (entityId) => bridgeRef?.liveState(entityId),
@@ -157,6 +166,7 @@ const heuristics = createHeuristicHost({
   log: haLog,
   timeZone,
   onCardChange: () => cardsChanged(),
+  onFactChange: () => factsChanged(),
 });
 const routesFor = (al: Allowlist, watched: string[]): RouteSpec[] => {
   const out: RouteSpec[] = [...al.routes];
@@ -189,6 +199,7 @@ const { runtime, journal } = createSqliteRuntime({ path: journalPath, onPersiste
   registration(mcpAuditAggregate, mcpEventCodec, mcpStateCodec),
   registration(pauseAggregate, pauseEventCodec, pauseStateCodec),
   registration(configAggregate, configEventCodec, configStateCodec),
+  registration(accessAggregate, accessEventCodec, accessStateCodec),
 ]);
 // The global pause, folded from the journal before any instance can act (a recovered
 // notice is resent through the actuator too).
@@ -394,9 +405,11 @@ const house = createHouseService({
   publish: (frame) => bus.publish(frame as unknown as StreamFrame),
   listening: () => bus.subscriberCount() > 0,
   cards: () => heuristics.cards(),
+  facts: () => heuristics.facts(),
   log: haLog,
 });
 cardsChanged = () => house.cardsChanged();
+factsChanged = () => house.factsChanged();
 
 // 10. Read API (journal implements JournalReader; ha implements RecorderReader).
 const readApi = createReadApi(
@@ -436,6 +449,8 @@ const reloader = createReloader({
         allowlist = next.allowlist;
         library = next.library;
         packages = next.packages;
+        libraryFacts = next.facts;
+        factSources = next.factSources;
         ({ tiles, groups } = next);
         checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
         house.configure(houseConfig());
@@ -466,6 +481,9 @@ const configWatch = watchConfig({ dir: config.configDir, log, onChange: () => vo
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const version = (JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version: string }).version;
 const mcpCategory = categoryTypes<McpCommand, void>(MCP_CATEGORY);
+// The explore tools' view of HA's registries (refreshed on registry events), and the starter set.
+const haRegistry = createHaRegistry({ ha, log: haLog });
+const starterSet = starterPackages();
 // The add-on's mcp_networks option; MCP_NETWORKS (comma-separated CIDRs) overrides it, standalone too.
 // A malformed entry is dropped with a warning rather than stopping the add-on.
 const mcpNetworks = resolveMcpNetworks(process.env.MCP_NETWORKS, config.options.mcp_networks).filter((cidr) => {
@@ -478,6 +496,50 @@ const mcpNetworks = resolveMcpNetworks(process.env.MCP_NETWORKS, config.options.
   }
 });
 log("info", `mcp: clients allowed from ${mcpNetworks.length > 0 ? mcpNetworks.join(", ") : "nowhere (no networks configured)"}`);
+// One MCP server, two doors: HA ingress on :8099, and the agent port with agent tokens
+// minted on the panel's Connect page (hashes in /data, mints and revocations journaled).
+const mcp = createMcp({
+  mode: config.mode,
+  networks: mcpNetworks,
+  version,
+  instructions: INSTRUCTIONS,
+  tools: [
+    ...createHouseTools({
+      scope,
+      liveState: (id) => bridge.liveState(id),
+      signals: signalStore,
+      journal,
+      ha,
+      users,
+      instances: () => heuristics.instances(),
+      facts: () => heuristics.facts(),
+      pause: () => pause.state(),
+      configDir: config.configDir,
+      house: houseFacts,
+      packages: () => packages,
+      cards: () => heuristics.cards(),
+      caller: currentCaller,
+    }),
+    // All of HA, read-only and never recorded (ha_registry, ha_states, ha_history, ha_services, suggest).
+    ...createHaTools({
+      ha,
+      registry: haRegistry,
+      states: () => bridge.liveCache(),
+      scope,
+      house: houseFacts,
+      instances: () => heuristics.instances(),
+      packages: () => packages,
+      starter: () => starterSet,
+    }),
+  ],
+  record: (call) => void runtime.tell(MCP_ENTITY, { tag: "Record", call }, mcpCategory).catch((err) => log("error", `mcp journal: ${String(err)}`)),
+  log: haLog,
+});
+const agentTokens = createAgentTokens({ path: join(config.dataDir, "agent-tokens.json"), record: createAccessJournal(runtime), log });
+// The add-on's port is fixed by config.yaml; standalone, MCP_AGENT_PORT moves it.
+const agentPort = config.mode === "addon" ? AGENT_PORT : Number(process.env.MCP_AGENT_PORT ?? AGENT_PORT);
+const agentPortInfo: () => Promise<AgentPortInfo> =
+  config.mode === "addon" ? supervisorPort({ token: config.haToken, log }) : async () => ({ port: agentPort, source: "standalone" });
 const health = (): HealthReport => {
   const haStats = ha.stats;
   const signalStats = signalStore.stats();
@@ -502,9 +564,17 @@ const server = startServer(
     readApi,
     health,
     heuristics: () => heuristics.instances(),
+    facts: () => heuristics.facts(),
     house,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
-    studio: { configDir: config.configDir, mode: config.mode, liveStates: () => bridge.liveCache().values(), scope, packages: () => packages },
+    studio: {
+      configDir: config.configDir,
+      mode: config.mode,
+      liveStates: () => bridge.liveCache().values(),
+      scope,
+      packages: () => packages,
+      facts: () => libraryFacts.map((f) => ({ id: f.id, title: f.title, ...factSources.get(f.id) })),
+    },
     reload: reloader,
     revisions,
     twins: journal,
@@ -512,35 +582,18 @@ const server = startServer(
     pause,
     command: (name, args, from) => heuristics.command(name, args, from),
     log,
-    record: createHouseRecord({ scope, signals: signalStore, journal, users, instances: () => heuristics.instances(), house: houseFacts }),
-    mcp: (app) =>
-      mountMcp(app, {
-        mode: config.mode,
-        networks: mcpNetworks,
-        version,
-        instructions: INSTRUCTIONS,
-        tools: createHouseTools({
-          scope,
-          liveState: (id) => bridge.liveState(id),
-          signals: signalStore,
-          journal,
-          ha,
-          users,
-          instances: () => heuristics.instances(),
-          pause: () => pause.state(),
-          configDir: config.configDir,
-          house: houseFacts,
-          packages: () => packages,
-          caller: currentCaller,
-        }),
-        record: (call) => void runtime.tell(MCP_ENTITY, { tag: "Record", call }, mcpCategory).catch((err) => log("error", `mcp journal: ${String(err)}`)),
-        log: haLog,
-      }),
+    record: createHouseRecord({ scope, signals: signalStore, journal, users, instances: () => heuristics.instances(), facts: () => heuristics.facts(), house: houseFacts }),
+    mcp: (app) => mcp.mountIngress(app),
+    connect: { mode: config.mode, tokens: agentTokens, port: agentPortInfo, log },
     panelDistDir: join(packageRoot, "panel-dist"),
   },
   8099,
 );
 log("info", "http server listening on :8099");
+const agentServer = startAgentServer((app) => mcp.mountAgents(app, { tokens: agentTokens, limiter: createFailureLimiter() }), agentPort, (err) =>
+  log("error", `mcp: the agent port ${agentPort} could not be opened: ${err.message}`),
+);
+log("info", `mcp: agent port listening on :${agentPort} (/mcp only, agent tokens: ${agentTokens.list().length})`);
 
 let shuttingDown = false;
 const shutdown = (): void => {
@@ -554,9 +607,11 @@ const shutdown = (): void => {
     monitor?.stop();
     telegram?.stop();
     house.stop();
+    haRegistry.stop();
     bridge.stop();
     await ha.stop();
     server.close();
+    agentServer.close();
     signalStore.close();
     viewsDb.close();
     journal.close();

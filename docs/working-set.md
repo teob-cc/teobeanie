@@ -241,7 +241,8 @@ In the **Heuristics** tab, **Revisions** lists them, newest first:
   the files that differ are written back, and a file added since then is removed.
   Files that are not part of the working set (notes, the typings) are left alone. The
   change is checked and applied like any other, all or nothing: if it is refused,
-  nothing changes and the tab says why.
+  nothing changes and the tab says why. Facts come back with their files and are
+  worked out again at once.
 
 A rollback is itself a new revision ("rollback to 12"), so a rollback can be rolled
 back too. Nothing is ever lost: the journal keeps what each instance did, whatever
@@ -272,8 +273,8 @@ without giving up the instance that works, add a **twin**: a second instance wit
   "params": { "door": "binary_sensor.back_door", "everyMin": 5 } }
 ```
 
-The twin watches the same things and decides on the same events, and may name the
-same lights as the original: it never switches them while the original is active.
+The twin watches the same things and decides on the same events, reads the same
+facts, and may name the same lights as the original: it never switches them while the original is active.
 Its card in the Heuristics tab says how many events in the last day it decided
 differently; its page lists them, the original's action next to the twin's.
 

@@ -7,15 +7,17 @@ import { Today } from "./views/Today";
 import { House } from "./views/House";
 import { Decisions } from "./views/Decisions";
 import { Heuristics } from "./views/Heuristics";
+import { Connect } from "./views/Connect";
 
 // The editor is megabytes: loaded the first time the Studio's Editor tab opens.
 const Studio = lazy(() => import("./views/Studio"));
 
-type Tab = "house" | "studio";
+type Tab = "house" | "studio" | "connect";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "house", label: "House" },
   { id: "studio", label: "Studio" },
+  { id: "connect", label: "Connect" },
 ];
 
 /** The Studio's own tabs: how Teobeanie decides, what it runs, what it called, and its code. */
@@ -205,6 +207,9 @@ export default function App() {
               </Suspense>
             </div>
           )}
+        </div>
+        <div style={tab === "connect" ? undefined : { display: "none" }}>
+          <Connect />
         </div>
       </main>
     </div>

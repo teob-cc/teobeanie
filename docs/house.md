@@ -2,8 +2,8 @@
 
 The House tab is the panel's first tab. It shows every entity in the house scope,
 grouped into sections, each with a summary on top and the entities below it, and the
-cards of the running heuristic instances. It updates in place while Home Assistant's
-states change. Nothing on it calls a service directly: a card's buttons run an
+cards of the running heuristic instances. It also lists the facts, the derived state the heuristics read. It updates in place
+while Home Assistant's states change. Nothing on it calls a service directly: a card's buttons run an
 instance's command, and the instance decides.
 
 ## What it shows
@@ -11,7 +11,7 @@ instance's command, and the instance decides.
 On top, a row of what needs a look: alarms that are on (leak, smoke, gas, CO,
 problem sensors), doors and windows that are open and for how long, low batteries,
 and how many entities are not reporting. Below it the pinned tiles (`tiles` in
-`tiles.json`), the instances' cards, then one section per aspect of the house:
+`tiles.json`), the instances' cards, the facts, then one section per aspect of the house:
 
 | Section | Summary on top |
 |---|---|
@@ -56,6 +56,16 @@ command as the HA user of the panel session (`POST api/command`, through ingress
 only), journaled like a Telegram command; a button with a confirm text asks first.
 The instance's reply goes where its replies always go (the chat). How a heuristic
 declares its card: [heuristics.md, Cards](heuristics.md#cards).
+
+## Facts
+
+The Facts section lists every fact that runs ([heuristics.md, Facts](heuristics.md#facts-derived-state)):
+its title, its value (yes or no for a true-or-false fact) and how long it has held.
+Click one for what it reads, which instances read it, and its timeline of the last
+24 hours: each change of its value with the reason and what made it re-evaluate (a
+change, time, another fact), the changes of the entities it reads, and the decisions
+of the instances that read it. An entity's own timeline shows the changes of the facts
+that read it. The section is provisional: the House view is redesigned later.
 
 ## Which entities
 
@@ -150,10 +160,15 @@ named under `outdoor` in `allowlist.json`.
   `config/area_registry/list`), cached for 10 minutes and read again after a
   reconnect or a registry update event. `cards`: per active or shadow instance
   with a view, `{ key, heuristic, id, mode, card?: { title, fields, buttons? }, error? }`.
+  `facts`: every fact that runs, `{ id, title, description?, unit?, value, known,
+  since, watch, facts, readers }` (`known` false and `value` null while it has none;
+  `facts` the facts it reads, `readers` the instances that read it). `GET api/facts`
+  is the same list alone, and `GET api/timeline?fact=<id>` a fact's timeline.
 - `GET api/house/energy-today`: today's totals per kind (`grid_import`,
   `grid_export`, `solar`, `gas`, `water`).
 - The SSE stream `api/stream` carries `house` frames: `{ at, states: { <id>: { state,
-  attributes, changedAt, updatedAt } }, cards? }`, the states that changed in the
-  last second, and every card again when any changed (an instance's state moved, or
-  an entity changed), sent only while a panel is connected. The panel reloads
+  attributes, changedAt, updatedAt } }, cards?, facts? }`, the states that changed in the
+  last second, every card again when any changed (an instance's state moved, or
+  an entity changed), and every fact again when one changed, sent only while a panel
+  is connected. The panel reloads
   `api/house` when the stream reconnects.

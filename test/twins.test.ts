@@ -14,6 +14,7 @@ import { houseScope } from "../src/allowlist.js";
 import { call, defineHeuristic } from "../src/kernel/heuristic.js";
 import { createHeuristicHost, loadInstances, type InstanceConfig } from "../src/kernel/host.js";
 import { createSafeActuator } from "../src/kernel/actuator.js";
+import { fact } from "../src/kernel/fact.js";
 import { applyConfig, createReloader } from "../src/reload.js";
 import { configAggregate, configEventCodec, configStateCodec, createConfigJournal, promoteTwinText } from "../src/working-set.js";
 import { createRevisionStore, recordBootRevision, rollback } from "../src/revisions.js";
@@ -138,6 +139,75 @@ describe("a shadow twin", () => {
           input: { kind: "signal", entity: "binary_sensor.a_motion", state: "on" },
           original: { why: "motion", actions: [{ kind: "call", service: "light.turn_on", entities: ["light.a"] }] },
           twin: { why: "motion", actions: [{ kind: "call", service: "light.turn_off", entities: ["light.a"] }] },
+        },
+      ],
+    });
+  });
+});
+
+describe("a twin that reads facts", () => {
+  // Switches the light with the service its params say when the fact turns true.
+  const onBusy = defineHeuristic<{ light: string; service?: string }, Record<string, never>, never>({
+    id: "on-busy",
+    title: "on-busy",
+    description: "",
+    watch: () => [],
+    facts: () => ["a-busy"],
+    actuates: (p) => [p.light],
+    initial: () => ({}),
+    decide(_s, input, ctx) {
+      if (input.kind !== "fact" || ctx.fact("a-busy")?.value !== true) return undefined;
+      return { why: "busy", actions: [call(ctx.params.service ?? "light.turn_on", ctx.params.light)] };
+    },
+    evolve: (s) => s,
+  });
+  const busy = fact("a-busy", ({ ha }) => ha.binary_sensor.a_motion.is("on"));
+
+  it("reads the same facts as its original, and the two are compared per fact change", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "teobeanie-twins-facts-"));
+    let motion = "off";
+    const actuator = createSafeActuator({ ha: { callService: async () => ({ context: { id: "x" } }) } });
+    const { runtime, journal } = createSqliteRuntime({ path: join(dir, "journal.db") }, []);
+    const instances: InstanceConfig[] = [
+      { heuristic: "on-busy", id: "a", mode: "active", params: { light: "light.a" } },
+      { heuristic: "on-busy", id: "a-next", mode: "shadow", params: { light: "light.a", service: "light.turn_off" }, twinOf: "on-busy/a" },
+    ];
+    const host = createHeuristicHost({
+      library: [onBusy],
+      facts: [busy],
+      instances,
+      actuator,
+      liveState: (id) => (id === "binary_sensor.a_motion" ? { entity_id: id, state: motion, attributes: {}, last_changed: "", last_updated: "" } : undefined),
+      scope,
+      forceShadow: false,
+      log: noLog,
+    });
+    host.attach(journal);
+    closers.push(async () => {
+      await host.stop();
+      await runtime.shutdown();
+      journal.close();
+    });
+    expect(host.facts()[0]?.readers).toEqual(["on-busy/a", "on-busy/a-next"]);
+    await host.start({ subscribeTrigger: async () => async () => {} });
+    motion = "on";
+    host.onSignal(sig(1));
+    const decided = (id: string) => journal.queryEvents({ category: "on-busy", entityId: id, order: "asc", limit: 100 }).filter((r) => r.manifest === "Decided");
+    await vi.waitFor(() => expect(decided("a")).toHaveLength(1));
+    await vi.waitFor(() => expect(decided("a-next")).toHaveLength(1));
+    // Both heard the one FactChanged.
+    const cause = decided("a")[0]!.envelope?.causationId;
+    expect(decided("a-next")[0]!.envelope?.causationId).toBe(cause);
+    const c = compareTwin(journal, "on-busy/a-next", "on-busy/a", { fromMs: Date.now() - 60_000, toMs: Date.now() + 60_000 });
+    expect(c).toMatchObject({
+      compared: 1,
+      same: 0,
+      differences: [
+        {
+          obsId: cause,
+          input: { kind: "fact", fact: "a-busy", value: true },
+          original: { why: "busy", actions: [{ service: "light.turn_on" }] },
+          twin: { why: "busy", actions: [{ service: "light.turn_off" }] },
         },
       ],
     });
