@@ -142,6 +142,47 @@ export interface ConfigChange {
   summary: string;
   /** The instances it touched; absent: all of them. */
   instances?: string[];
+  /** The revision it made (src/revisions.ts); absent on rows from before revisions. */
+  revision?: number;
+  parent?: number;
+}
+
+/** A revision of the working set (src/revisions.ts listRevisions). */
+export interface RevisionRow {
+  revision: number;
+  parent?: number;
+  at: number;
+  by: string;
+  summary: string;
+  instances?: string[];
+  /** The files it changed against its parent. */
+  file: string;
+  fileCount: number;
+}
+
+/** One file's change between two revisions (src/revisions.ts FileDiff). */
+export interface FileDiff {
+  path: string;
+  status: "added" | "removed" | "changed";
+  diff: string;
+}
+
+/** A twin against its original, per input signal (src/twins.ts TwinComparison). */
+export interface TwinComparison {
+  twin: string;
+  original: string;
+  from: number;
+  to: number;
+  compared: number;
+  same: number;
+  differences: Array<{
+    obsId: string;
+    at: number;
+    input: { kind: string; entity?: string; state?: string };
+    original?: { why?: string; actions: unknown[] };
+    twin?: { why?: string; actions: unknown[] };
+  }>;
+  other: { original: number; twin: number };
 }
 
 /** A config reload (src/reload.ts): what changed, or why the config was rejected. */
@@ -283,6 +324,17 @@ export const api = {
   addInstance: (inst: InstanceConfig) => edit("api/instances", "POST", inst),
   saveInstance: (key: string, inst: Omit<InstanceConfig, "heuristic" | "id">) => edit(instanceUrl(key), "PUT", inst),
   removeInstance: (key: string) => edit(instanceUrl(key), "DELETE"),
+  /** The working set's revisions, newest first. */
+  revisions: () => getJson<{ revisions: RevisionRow[] }>("api/revisions"),
+  /** What changed from revision a to b, file by file. */
+  revisionDiff: (a: number, b: number) => getJson<{ from: number; to: number; files: FileDiff[] }>(`api/revisions/${a}/diff/${b}`),
+  /** Put revision n's files back and reload; a rejection is an outcome too (the files stay as they were). */
+  rollback: (n: number) => edit(`api/revisions/${n}/rollback`, "POST"),
+  /** The twins, each against its original over the last day. */
+  twins: () => getJson<{ twins: TwinComparison[] }>("api/twins"),
+  twin: (key: string) => getJson<TwinComparison>(`api/twins/${key.split("/").map(encodeURIComponent).join("/")}`),
+  /** The twin takes its original's place (id and mode) in one revision. */
+  promote: (key: string) => edit(`api/twins/${key.split("/").map(encodeURIComponent).join("/")}/promote`, "POST"),
   pause: () => getJson<PauseState>("api/pause"),
   /** Pause every heuristic but the guards, or resume them; journaled with the HA user. */
   setPause: async (paused: boolean, reason?: string): Promise<PauseState> => {

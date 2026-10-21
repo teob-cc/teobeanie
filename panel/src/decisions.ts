@@ -26,6 +26,8 @@ export interface HeuristicInstance {
   pattern?: string;
   triggers: string[];
   params: unknown;
+  /** The instance this one is a shadow twin of. */
+  twinOf?: string;
 }
 
 export type Action =

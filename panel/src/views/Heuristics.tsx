@@ -7,6 +7,8 @@ import { Decisions } from "./Decisions";
 import { useDeviceEntities } from "../useDevices";
 import { Catalogue } from "../components/Catalogue";
 import { InstanceEditor, MODE_EFFECT } from "../components/InstanceEditor";
+import { Revisions, TwinPanel } from "../components/Revisions";
+import type { TwinComparison } from "../api";
 
 const DAY_MS = 24 * 3600e3;
 
@@ -46,7 +48,7 @@ export function Heuristics({
   onOpenSource?: (heuristic: string) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState<"instances" | "library">("instances");
+  const [view, setView] = useState<"instances" | "library" | "revisions">("instances");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [saved, setSaved] = useState<{ what: string; outcome: EditOutcome } | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
@@ -88,6 +90,16 @@ export function Heuristics({
       .catch((e) => setReloadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setReloading(false));
   };
+  // Each twin against its original over the last day, for the instance cards.
+  const [twins, setTwins] = useState<Map<string, TwinComparison>>(new Map());
+  const hasTwins = instances.some((i) => i.twinOf !== undefined);
+  useEffect(() => {
+    if (!hasTwins) return setTwins(new Map());
+    api
+      .twins()
+      .then((r) => setTwins(new Map(r.twins.map((t) => [t.twin, t]))))
+      .catch(() => setTwins(new Map()));
+  }, [hasTwins, lastReload?.at]);
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [now, setNow] = useState(Date.now());
 
@@ -193,6 +205,10 @@ export function Heuristics({
         </header>
         {savedBanner}
         {editError && <div className="banner">Cannot edit: {editError}</div>}
+        {current.twinOf !== undefined && <TwinPanel key={`${current.key}@${lastReload?.at ?? 0}`} twinKey={current.key} onPromoted={() => {
+          setSelected(null);
+          onReloaded();
+        }} />}
         <InstanceFacts i={current} timers={stats.get(current.key)?.timers ?? []} now={now} />
         <Decisions subscribe={subscribe} instances={instances} only={current} />
       </div>
@@ -215,6 +231,9 @@ export function Heuristics({
           </button>
           <button role="tab" aria-selected={view === "library"} className={view === "library" ? "tab active" : "tab"} onClick={() => setView("library")}>
             Library
+          </button>
+          <button role="tab" aria-selected={view === "revisions"} className={view === "revisions" ? "tab active" : "tab"} onClick={() => setView("revisions")}>
+            Revisions
           </button>
         </span>
         <button className="tab" onClick={reloadConfig} disabled={reloading} title="Read heuristics.json, allowlist.json and tiles.json again">
@@ -246,6 +265,7 @@ export function Heuristics({
           )}
         </>
       )}
+      {view === "revisions" && <Revisions {...(lastReload ? { reloadedAt: lastReload.at } : {})} onRolledBack={onReloaded} />}
       {view === "instances" && instances.length === 0 && !error && (
         <p className="muted">
           No heuristics configured yet. Pick one in the{" "}
@@ -268,6 +288,16 @@ export function Heuristics({
                     <span className="hcard-name">{i.id}</span>
                     <ModeChip i={i} />
                   </div>
+                  {i.twinOf !== undefined && (
+                    <div className="small">
+                      <span className="chip chip-on">twin of {i.twinOf}</span>{" "}
+                      {twins.get(i.key) && (
+                        <span className="muted tnum">
+                          {twins.get(i.key)!.compared - twins.get(i.key)!.same} of {twins.get(i.key)!.compared} inputs decided differently in 24 h · open to promote
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div className="hcard-last small">
                     {s?.last ? (
                       <>
