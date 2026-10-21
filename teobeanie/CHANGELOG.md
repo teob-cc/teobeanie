@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — develop and operate behaviours over MCP
 
 - **Develop and operate over MCP.** New tools let an agent work on the behaviours
   through the same connection it explores with. Develop, in shadow: `package_list`,

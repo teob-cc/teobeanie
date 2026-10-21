@@ -14,7 +14,7 @@ Your AI agent is the workbench: it explores, writes, tests and explains with the
 record and the code in reach. Execution is plain deterministic code, with no LLM in the
 loop.
 
-> **Status: alpha (0.3).** Behaviours run in shadow next to your existing automations
+> **Status: alpha (0.4).** Behaviours run in shadow next to your existing automations
 > until you switch them on: they decide and journal what they *would* do, and the panel
 > shows how often your current system did the same.
 

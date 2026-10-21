@@ -170,7 +170,7 @@ the bridge are journaled with your Home Assistant user.
 | "refused: … stays shadow because …" | Teobeanie makes an instance active only when its specs pass and it decided in shadow within the last day. Fix the spec, or wait for a decision |
 | An instance stays in shadow after "active" | Someone turned the add-on's `shadow_mode` emergency switch on. Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
 
-Teobeanie is alpha (0.3). Its MCP tools explore all of Home Assistant (`ha_registry`,
+Teobeanie is alpha (0.4). Its MCP tools explore all of Home Assistant (`ha_registry`,
 `ha_states`, `ha_history`, `ha_services`, `suggest`) and the house scope's record,
 develop behaviours in shadow (`scope_add`, `instance_upsert`, `test_run`, `replay`, …)
 and operate them (`instance_mode`, `rollback`, `pause`, …). None of them switches a
