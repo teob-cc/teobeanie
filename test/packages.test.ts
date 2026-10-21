@@ -174,7 +174,7 @@ describe("the loader", () => {
     expect(lib.heuristics.map((d) => d.id)).toEqual(["twice"]);
     expect(failures).toEqual([
       "packages/a-extra: teobeanie.json names a-two, which the code does not define",
-      'packages/b-later: platform: needs "teobeanie" >=2.0.0, this is 0.2.0',
+      `packages/b-later: platform: needs "teobeanie" >=2.0.0, this is ${SDK_VERSION}`,
       'packages/c-pattern: heuristics.c-one.pattern: "guard", the heuristic says "notice"; heuristics.c-one.uses: "outdoor", but it does not read the outdoor conditions',
       'twice.ts: heuristic id "twice" is already defined',
     ]);
