@@ -57,6 +57,10 @@ export function Connect() {
   useEffect(load, [load]);
 
   const mint = () => {
+    if (name.trim() === "") {
+      setError("Give the token a name first, such as the agent and the machine it runs on.");
+      return;
+    }
     setBusy(true);
     setError(null);
     api
@@ -103,8 +107,15 @@ export function Connect() {
       {info?.source === "default" && <p className="muted small">The add-on's network info could not be read: the lines below assume the default port {info.defaultPort}.</p>}
 
       <div className="toolbar">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Claude Code on my laptop" aria-label="token name" maxLength={80} />
-        <button className="tab active" onClick={mint} disabled={busy || name.trim() === ""}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && !busy && mint()}
+          placeholder="name it, e.g. Claude Code on my laptop"
+          aria-label="token name"
+          maxLength={80}
+        />
+        <button className="tab active" onClick={mint} disabled={busy}>
           {busy ? "…" : "Mint a token"}
         </button>
       </div>

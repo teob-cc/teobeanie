@@ -160,6 +160,10 @@ pre {
 .tab:hover {
   color: var(--ink);
 }
+.tab:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .tab.active {
   background: var(--surface);
   border-color: var(--border);
