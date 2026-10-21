@@ -175,17 +175,17 @@ export function describeChanges(c: ReloadChanges, before: InstanceInfo[], after:
 
 // ---- editing heuristics.json in place ----
 
-interface Node {
+export interface JsonNode {
   start: number;
   /** One past the last character. */
   end: number;
   value?: unknown;
-  members?: Array<{ key: string; keyStart: number; keyEnd: number; value: Node }>;
-  items?: Node[];
+  members?: Array<{ key: string; keyStart: number; keyEnd: number; value: JsonNode }>;
+  items?: JsonNode[];
 }
 
 /** Where each value of a JSON text is: enough to replace one and keep the rest as written. */
-function locate(text: string): Node {
+export function locateJson(text: string): JsonNode {
   let i = 0;
   const ws = (): void => {
     while (i < text.length && /\s/.test(text[i]!)) i++;
@@ -196,13 +196,13 @@ function locate(text: string): Node {
     i++;
     return JSON.parse(text.slice(start, i)) as string;
   };
-  const value = (): Node => {
+  const value = (): JsonNode => {
     ws();
     const start = i;
     const ch = text[i];
     if (ch === "{") {
       i++;
-      const members: NonNullable<Node["members"]> = [];
+      const members: NonNullable<JsonNode["members"]> = [];
       for (ws(); text[i] !== "}"; ws()) {
         if (text[i] === ",") {
           i++;
@@ -220,7 +220,7 @@ function locate(text: string): Node {
     }
     if (ch === "[") {
       i++;
-      const items: Node[] = [];
+      const items: JsonNode[] = [];
       for (ws(); text[i] !== "]"; ws()) {
         if (text[i] === ",") i++;
         else items.push(value());
@@ -238,19 +238,19 @@ function locate(text: string): Node {
 }
 
 /** heuristics.json's "instances" array, once the text is known to parse. */
-function instancesArray(text: string): Node & { items: Node[] } {
+function instancesArray(text: string): JsonNode & { items: JsonNode[] } {
   try {
     JSON.parse(text);
   } catch (err) {
     throw new Error(`heuristics.json: unparseable JSON: ${(err as Error).message}`);
   }
-  const list = locate(text).members?.find((m) => m.key === "instances")?.value;
+  const list = locateJson(text).members?.find((m) => m.key === "instances")?.value;
   if (list?.items === undefined) throw new Error('heuristics.json: missing "instances" array');
-  return list as Node & { items: Node[] };
+  return list as JsonNode & { items: JsonNode[] };
 }
 
 /** The instance's object and its place in the array; -1 when there is none. */
-function instanceIndex(list: Node & { items: Node[] }, key: string): number {
+function instanceIndex(list: JsonNode & { items: JsonNode[] }, key: string): number {
   const slash = key.indexOf("/");
   const [heuristic, id] = [key.slice(0, slash), key.slice(slash + 1)];
   return list.items.findIndex((o) => {
@@ -260,7 +260,7 @@ function instanceIndex(list: Node & { items: Node[] }, key: string): number {
 }
 
 /** The instance's object in heuristics.json's text, by key ("relay-pulse/gate"). */
-export function findInstance(text: string, key: string): { start: number; end: number; members: NonNullable<Node["members"]> } {
+export function findInstance(text: string, key: string): { start: number; end: number; members: NonNullable<JsonNode["members"]> } {
   const list = instancesArray(text);
   const o = list.items[instanceIndex(list, key)];
   if (o === undefined) throw new Error(`heuristics.json: no instance ${key}`);
@@ -401,7 +401,7 @@ export function removeInstance(text: string, key: string): string {
 }
 
 /** The object at `path` under the instance (an empty path: the instance itself). */
-function objectAt(text: string, key: string, path: string[]): Node {
+function objectAt(text: string, key: string, path: string[]): JsonNode {
   const list = instancesArray(text);
   let node = list.items[instanceIndex(list, key)];
   if (node === undefined) throw new Error(`heuristics.json: no instance ${key}`);
@@ -446,6 +446,11 @@ function patch(text: string, key: string, path: string[], value: unknown): strin
     return out;
   }
   return text.slice(0, node.start) + render(value, lineIndent(text, node.start), layout, name.length + 3) + text.slice(node.end);
+}
+
+/** heuristics.json's text with one field of the instance set in place (undefined: removed), such as "twinOf". */
+export function setInstanceField(text: string, key: string, field: string, value: unknown): string {
+  return patch(text, key, [field], value);
 }
 
 /**

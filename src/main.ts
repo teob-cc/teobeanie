@@ -55,6 +55,7 @@ import { createMcp, currentCaller } from "./mcp/index.js";
 import { mcpNetworks as resolveMcpNetworks, networks } from "./mcp/access.js";
 import { MCP_CATEGORY, MCP_ENTITY, mcpAuditAggregate, mcpEventCodec, mcpStateCodec, type McpCommand } from "./mcp/journal.js";
 import { INSTRUCTIONS, createHouseTools } from "./mcp/tools.js";
+import { DEVELOP_INSTRUCTIONS, createDevelopTools } from "./mcp/develop.js";
 import { createHaTools } from "./mcp/ha-tools.js";
 import { createHaRegistry } from "./ha-registry.js";
 import { createHouseRecord } from "./mcp/timeline.js";
@@ -502,7 +503,7 @@ const mcp = createMcp({
   mode: config.mode,
   networks: mcpNetworks,
   version,
-  instructions: INSTRUCTIONS,
+  instructions: `${INSTRUCTIONS}\n${DEVELOP_INSTRUCTIONS}`,
   tools: [
     ...createHouseTools({
       scope,
@@ -530,6 +531,24 @@ const mcp = createMcp({
       instances: () => heuristics.instances(),
       packages: () => packages,
       starter: () => starterSet,
+    }),
+    // Develop and operate: each write one revision through the reloader, by mcp:<caller>.
+    ...createDevelopTools({
+      configDir: config.configDir,
+      reloader,
+      revisions,
+      journal,
+      instances: () => heuristics.instances(),
+      library: () => ({ heuristics: library, facts: libraryFacts, factSources, packages }),
+      starter: () => starterSet,
+      scope,
+      liveStates: () => bridge.liveCache().values(),
+      ha,
+      users,
+      house: houseFacts,
+      pause,
+      command: (name, args, from) => heuristics.command(name, args, from),
+      caller: currentCaller,
     }),
   ],
   record: (call) => void runtime.tell(MCP_ENTITY, { tag: "Record", call }, mcpCategory).catch((err) => log("error", `mcp journal: ${String(err)}`)),

@@ -1,7 +1,9 @@
 // index.ts — the MCP endpoint: POST /mcp (Streamable HTTP, stateless), behind the
 // access checks in access.ts. One server, two doors: Home Assistant ingress on the main
 // port, and the agent port with an agent token (agents.ts). Every tool call is
-// journaled with its caller.
+// journaled with its caller, and a write tool's call with the revision it made. Each
+// tool is listed with its MCP annotations (develop.ts): read-only, a write to the
+// working set, or an operate step a client should confirm.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Hono } from "hono";
@@ -10,6 +12,7 @@ import { createMCPServer, mcpHono } from "@lambda-house/teob-ts/mcp-server";
 import { checkAccess, checkAgentAccess, networks, type Caller } from "./access.js";
 import type { AgentTokens, FailureLimiter } from "./agents.js";
 import type { ToolCalled } from "./journal.js";
+import type { AnnotatedTool, ToolAnnotations } from "./develop.js";
 
 const callers = new AsyncLocalStorage<Caller>();
 /** The caller of the MCP request being handled, if any. */
@@ -47,9 +50,13 @@ export function mountMcp(app: Hono, deps: McpDeps): void {
   createMcp(deps).mountIngress(app);
 }
 
+/** A tool's annotations as listed: its own, else read-only (the house and explore tools). */
+const annotationsOf = (t: MCPTool): ToolAnnotations => (t as AnnotatedTool).annotations ?? { readOnlyHint: true, openWorldHint: false };
+
 export function createMcp(deps: McpDeps): Mcp {
   const allowed = networks(deps.networks);
   const registry = createMCPToolRegistry();
+  const annotations = new Map(deps.tools.map((t) => [t.name, annotationsOf(t)]));
   for (const t of deps.tools) {
     registry.register({
       ...t,
@@ -69,17 +76,34 @@ export function createMcp(deps: McpDeps): Mcp {
           ok: result.success,
           ...(result.error !== undefined ? { error: result.error } : {}),
           ms: Date.now() - at,
+          ...(revisionOf(result.output) !== undefined ? { revision: revisionOf(result.output)! } : {}),
         });
         return result;
       },
     });
   }
-  const server = createMCPServer({
+  const base = createMCPServer({
     registry,
     serverInfo: { name: "teobeanie", version: deps.version },
     instructions: deps.instructions,
     log: deps.log,
   });
+  // tools/list with each tool's annotations (the framework lists name, description and schema).
+  const server: typeof base = {
+    ...base,
+    async handle(message) {
+      const response = await base.handle(message);
+      const method = (message as { method?: unknown } | null)?.method;
+      const tools = (response as { result?: { tools?: Array<{ name: string }> } } | null)?.result?.tools;
+      if (method === "tools/list" && Array.isArray(tools)) {
+        for (const t of tools) {
+          const a = annotations.get(t.name);
+          if (a !== undefined) Object.assign(t, { annotations: a });
+        }
+      }
+      return response;
+    },
+  };
 
   const peer = (c: Ctx): string | undefined => (c as unknown as Peer).env?.incoming?.socket?.remoteAddress;
   const mount = (app: Hono, guard: (c: Ctx, next: () => Promise<void>) => Promise<Response | void>): void => {
@@ -113,4 +137,10 @@ export function createMcp(deps: McpDeps): Mcp {
       });
     },
   };
+}
+
+/** The revision a write tool's answer names, if any. */
+function revisionOf(output: unknown): number | undefined {
+  const r = (output as { revision?: unknown } | null | undefined)?.revision;
+  return typeof r === "number" ? r : undefined;
 }

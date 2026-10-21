@@ -519,7 +519,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
   ];
 }
 
-export const INSTRUCTIONS = `Teobeanie, the house's event-sourced assistant agent. Every tool here is read-only: none of them switches anything (behaviours act, through the SafeActuator). Every call you make is journaled (tool_calls).
+export const INSTRUCTIONS = `Teobeanie, the house's event-sourced assistant agent. No tool here switches anything in the house (behaviours act, through the SafeActuator). The tools below read; the develop and operate tools (after them) change the working set, one revision at a time. Every call you make is journaled (tool_calls).
 First call whoami (the connection and the house's time zone), then house_scope and house_state: the house scope (allowlist.json) is what Teobeanie observes and may operate, with each instance's card and the facts (derived state, a value and since when it holds). heuristics lists the instances that run; if there are none, this is a first setup.
 To explore all of Home Assistant, outside the scope too, use ha_registry (areas, devices, entities), ha_states (current states), ha_history (the recorder, any entity) and ha_services (services and their fields, for writing behaviours); suggest says which behaviour packages fit, with their entities bound. Nothing they read is recorded, so Home Assistant's own MCP server is not needed.
 Inside the scope: recent_changes says who changed what (Teobeanie, a person, a system user such as the Supervisor, an automation, the device); decisions shows Teobeanie's reasoning and what became of each action; heuristics and heuristic_source show the logic. Heuristic instances in "shadow" mode decide and journal but never act.

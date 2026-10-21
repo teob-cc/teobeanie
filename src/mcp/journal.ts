@@ -28,6 +28,8 @@ export interface ToolCalled {
   ok: boolean;
   error?: string;
   ms: number;
+  /** The working-set revision a write tool made (develop.ts). */
+  revision?: number;
 }
 
 export type McpCommand = { tag: "Record"; call: Omit<ToolCalled, "tag"> };
