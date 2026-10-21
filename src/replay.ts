@@ -14,7 +14,8 @@
 // `cli.js replay` fetches the history and prints the comparison.
 
 import { houseZone } from "./kernel/clock.js";
-import type { Action, AnyHeuristic, HouseFacts } from "./kernel/heuristic.js";
+import { outdoorEntities, type Action, type AnyHeuristic, type HouseFacts } from "./kernel/heuristic.js";
+import { planFacts, type AnyFact } from "./kernel/fact.js";
 import { simulate } from "./kernel/simulate.js";
 
 export interface Recorded {
@@ -45,6 +46,45 @@ export interface ReplayOptions {
   house?: HouseFacts;
   /** Drive the owned entities: calls take effect at once; a recorded change of an owned entity is replayed only when keep() is true. */
   drive?: { keep(r: Recorded): boolean };
+  /** The facts the heuristic reads (factsFor): evaluated over the recorded changes as the host would have. */
+  facts?: AnyFact[];
+}
+
+/**
+ * The facts an instance reads, with the facts those read in turn, out of the library's
+ * facts; and the entities they re-evaluate on, whose history a replay needs too. A fact
+ * it names that the library does not define is in `unknown` (the replay then refuses,
+ * as the loader would).
+ */
+export function factsFor(def: AnyHeuristic, params: unknown, all: readonly AnyFact[], house: HouseFacts = {}): { facts: AnyFact[]; entities: string[]; unknown: string[] } {
+  const named = def.facts?.(params) ?? [];
+  if (named.length === 0) return { facts: [], entities: [], unknown: [] };
+  const plan = planFacts(all, house.outdoor !== undefined ? { outdoor: house.outdoor } : {});
+  const unknown = named.filter((n) => !plan.aliases.has(n));
+  const wanted = new Set<string>();
+  const add = (id: string): void => {
+    if (wanted.has(id)) return;
+    wanted.add(id);
+    for (const d of plan.deps.get(id) ?? []) add(d);
+  };
+  for (const n of named) if (plan.aliases.has(n)) add(plan.aliases.get(n)!);
+  const facts = plan.facts.filter((f) => wanted.has(f.id));
+  const entities = [...new Set(facts.flatMap((f) => plan.entities.get(f.id) ?? []))];
+  return { facts, entities, unknown };
+}
+
+/** The entities a replay of an instance needs the history of: what it watches, owns and reads, the outdoor sources it uses, and its facts' inputs. */
+export function replayEntities(def: AnyHeuristic, params: unknown, house: HouseFacts = {}, factEntities: string[] = []): string[] {
+  return [
+    ...new Set([
+      ...def.watch(params),
+      ...def.actuates(params),
+      ...(def.reads?.(params) ?? []),
+      ...(def.watchAttributes?.(params) ?? []),
+      ...(def.usesOutdoor ? outdoorEntities(house.outdoor) : []),
+      ...factEntities,
+    ]),
+  ];
 }
 
 /** Run def with params from `from` to `to` over the recorded changes (any order). */
@@ -53,7 +93,13 @@ export function replay(def: AnyHeuristic, params: unknown, recorded: Recorded[],
   const owned = new Set(def.actuates(params));
   const world: Record<string, { state: string; attributes: Record<string, unknown>; since: number }> = {};
   for (const r of sorted) if (r.at <= span.from) world[r.entity] = { state: r.state, attributes: r.attributes, since: r.at };
-  const sim = simulate(def, params, world, { t0: span.from, mode: "shadow", ...(opts.house ? { house: opts.house } : {}), instance: "replay" });
+  const sim = simulate(def, params, world, {
+    t0: span.from,
+    mode: "shadow",
+    ...(opts.house ? { house: opts.house } : {}),
+    ...(opts.facts !== undefined && opts.facts.length > 0 ? { facts: opts.facts } : {}),
+    instance: "replay",
+  });
   // The owned entities as Teobeanie would have left them (drive mode).
   const targets = new Map(Object.entries(world).filter(([e]) => owned.has(e)));
   let seen = 0;

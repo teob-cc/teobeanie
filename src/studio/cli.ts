@@ -28,20 +28,18 @@
 // the typings for its allowlist; needs no Home
 // Assistant. A folder that is not empty is refused unless --force.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { HaEntityState } from "@lambda-house/teob-ts/ha";
 import { loadAllowlist } from "../allowlist.js";
 import { loadLibrary } from "../packages/library.js";
 import { houseZone, isTimeZone } from "../kernel/clock.js";
-import { outdoorEntities, type HouseFacts } from "../kernel/heuristic.js";
+import type { HouseFacts } from "../kernel/heuristic.js";
 import { loadInstances } from "../kernel/host.js";
 import { validateParams } from "../kernel/params.js";
-import { compare, fmtAt, formatParity, houseChanges, replay, type Recorded } from "../replay.js";
-import { heuristicsJsonSchema } from "./config-schema.js";
-import { factModule, generateHouseTypes } from "./house-types.js";
+import { compare, factsFor, fmtAt, formatParity, houseChanges, replay, replayEntities, type Recorded } from "../replay.js";
 import { initWorkingSet } from "./init.js";
-import { CONFIG_TSCONFIG, toolkitTypes } from "./toolkit-types.js";
+import { writeTypes } from "./write-types.js";
 
 const USAGE = [
   "usage: node dist/studio/cli.js init <folder> [--force]",
@@ -95,31 +93,15 @@ async function types(dir: string): Promise<void> {
   const scope = existsSync(join(dir, "allowlist.json")) ? loadAllowlist(dir, () => {}).scope : undefined;
   if (scope === undefined) console.warn(`no ${join(dir, "allowlist.json")}: typing every entity, none operable`);
   const states = scope === undefined ? all : all.filter((s) => scope.observes(s.entity_id));
-
-  const write = (path: string, text: string): void => {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, text);
-  };
   // The folder's packages, the starter ones it does not have yet, and its own files: their
   // facts are typed in ha.d.ts, their heuristics' params in heuristics.schema.json.
   const lib = await loadLibrary(dir, (_l, m) => console.error(m), undefined, { withStarter: true });
-  const facts = lib.facts.map((f) => {
-    const src = lib.factSources.get(f.id);
-    const module = src === undefined ? undefined : factModule(join(dir, "heuristics"), src.file);
-    return { id: f.id, title: f.title, ...(module !== undefined ? { module } : {}), ...(src?.binding !== undefined ? { binding: src.binding } : {}) };
-  });
-  write(join(dir, "heuristics", "ha.d.ts"), generateHouseTypes(states, { at: Date.now(), operable: scope?.operated ?? [], facts }));
-  const toolkit = toolkitTypes();
-  if (toolkit === undefined) {
+  const r = writeTypes(dir, { states, operable: scope?.operated ?? [], library: lib });
+  if (r.noToolkit) {
     console.error("no emitted declarations next to the toolkit: build first (pnpm build)");
     process.exit(1);
   }
-  for (const [file, text] of Object.entries(toolkit)) write(join(dir, ".teob", file), text);
-  // heuristics.json's instances, checked by an editor as the loader checks them.
-  write(join(dir, ".teob", "heuristics.schema.json"), `${JSON.stringify(heuristicsJsonSchema(lib.heuristics), null, 2)}\n`);
-  const tsconfig = join(dir, "tsconfig.json");
-  if (!existsSync(tsconfig)) write(tsconfig, `${JSON.stringify(CONFIG_TSCONFIG, null, 2)}\n`);
-  console.log(`wrote ${states.length} entities (${scope?.operated.length ?? 0} operable) and ${facts.length} facts to ${join(dir, "heuristics", "ha.d.ts")}, the "teobeanie" module and heuristics.schema.json to ${join(dir, ".teob")}/`);
+  console.log(`wrote ${r.entities} entities (${r.operable} operable) and ${r.facts} facts to ${join(dir, "heuristics", "ha.d.ts")}, the "teobeanie" module and heuristics.schema.json to ${join(dir, ".teob")}/`);
 }
 
 async function replayCommand(dir: string, args: string[]): Promise<void> {
@@ -145,8 +127,8 @@ async function replayCommand(dir: string, args: string[]): Promise<void> {
     console.error(`name an instance, or --heuristic and --params\n${USAGE}`);
     process.exit(2);
   }
-  const library = (await loadLibrary(dir, log, undefined, { withStarter: true })).heuristics;
-  const def = library.find((d) => d.id === heuristicId);
+  const lib = await loadLibrary(dir, log, undefined, { withStarter: true });
+  const def = lib.heuristics.find((d) => d.id === heuristicId);
   if (def === undefined) {
     console.error(`no heuristic "${heuristicId}" (in ${join(dir, "packages")}, the starter packages or ${join(dir, "heuristics")})`);
     process.exit(2);
@@ -169,9 +151,13 @@ async function replayCommand(dir: string, args: string[]): Promise<void> {
   const to = Date.now();
   const from = to - days * 86_400_000;
   const owned = def.actuates(params);
-  const entities = [
-    ...new Set([...def.watch(params), ...owned, ...(def.watchAttributes?.(params) ?? []), ...(def.usesOutdoor ? outdoorEntities(house.outdoor) : [])]),
-  ];
+  // The facts it reads run over the same history, as the host runs them live.
+  const facts = factsFor(def, params, lib.facts, house);
+  if (facts.unknown.length > 0) {
+    console.error(`${heuristicId} reads fact ${facts.unknown.join(", ")}, which no package or file in ${dir} defines`);
+    process.exit(2);
+  }
+  const entities = replayEntities(def, params, house, facts.entities);
 
   // Full attributes, attribute-only changes included: a sun elevation or a weather reading can be a signal.
   const history = await get<HaEntityState[][]>(
@@ -189,12 +175,14 @@ async function replayCommand(dir: string, args: string[]): Promise<void> {
   const replaces = flags.get("replaces");
   const calls = replay(def, params, recorded, { from, to }, {
     house,
+    facts: facts.facts,
     ...(replaces !== undefined ? { drive: { keep: (r: Recorded) => who(r.entity, r.at, r.state) !== replaces } } : {}),
   });
   const all = houseChanges(recorded, owned).map((c) => ({ ...c, ...withBy(who(c.entity, c.at, c.state)) }));
   const changes = replaces === undefined ? all : all.filter((c) => c.by === replaces);
   const label = instance !== undefined ? `${key}${flags.has("heuristic") || rawParams !== undefined ? ` as ${heuristicId} with the given params` : ""}` : heuristicId;
   console.log(`replay ${label}: ${fmtAt(from, tz)} → ${fmtAt(to, tz)} ${tz} (${days} days), ${recorded.length} recorded states of ${entities.length - missing.length} entities`);
+  if (facts.facts.length > 0) console.log(`facts evaluated over the same history: ${facts.facts.map((f) => f.id).join(", ")}`);
   if (missing.length > 0) console.log(`no history for ${missing.join(", ")}`);
   if (replaces !== undefined) {
     const others = all.filter((c) => c.by !== replaces);
