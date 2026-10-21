@@ -18,6 +18,10 @@
   Assistant token or bridge is needed to connect any more; the bridge through ingress
   stays as the fallback. The port can be moved or closed in the add-on's Network
   section.
+- **The agent port refuses a hidden client.** When the host's port mapping shows every
+  client as the Supervisor network's gateway (172.30.32.1, inside the default
+  172.16.0.0/12), the agent port refuses it with a 403 that says why, and logs it once.
+  Use the bridge through ingress, or list `172.30.32.0/23` in `mcp_networks` on purpose.
 
 ## 0.2.0 — first public alpha
 

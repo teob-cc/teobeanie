@@ -154,6 +154,7 @@ the bridge are journaled with your Home Assistant user.
 | MCP refused: `unauthorized: …` (401) | The token was revoked, or mistyped. Mint a new one on the Connect page and run the new line (`claude mcp remove teobeanie` first) |
 | MCP refused: `too many attempts` (429) | Too many wrong tokens from your address. Wait ten minutes |
 | The bridge cannot find the add-on ("no Teobeanie add-on is installed", "several Teobeanie add-ons") | Name it: add `-e ADDON=<slug>` to `claude mcp add`. The slug is in the add-on page's address, such as `abcd1234_teobeanie` |
+| MCP refused: `forbidden: client 172.30.32.1 is in the Supervisor network` (403) | The host's port mapping hides your machine's address from the add-on, so the agent port cannot check it. Use the bridge through ingress ([Fallback](#fallback-the-bridge-through-ingress)), or add `172.30.32.0/23` to the add-on's `mcp_networks` option and restart, knowing that only the agent token then protects the port ([Network](../teobeanie/DOCS.md#network)) |
 | MCP refused: `forbidden: client … is not in the allowed networks` (403) | Your machine's address is outside the add-on's `mcp_networks` option (default: the private LAN ranges and Tailscale). Add your network there and restart the add-on |
 | Home Assistant rejected the token | Make a new long-lived token and save it to the file again |
 | A reload was rejected after a push | The add-on keeps the previous config. The reason is in the add-on's log (Settings → Add-ons → Teobeanie → Log) and on the panel's Heuristics tab. Fix the file, commit, push again |

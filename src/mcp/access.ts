@@ -8,7 +8,10 @@
 //
 // The second door is the add-on's own port (8199, agents.ts): it serves only /mcp, and
 // every request carries an agent token minted in the panel. There the client is the
-// connection's peer itself, which must be in the same networks.
+// connection's peer itself, which must be in the same networks. On Home Assistant OS the
+// host's port mapping may hide that peer behind the Supervisor network's gateway
+// (172.30.32.1), which the default 172.16.0.0/12 contains: a peer inside the Supervisor
+// network is refused unless the owner lists that network itself (supervisorListed).
 
 import { BlockList, isIP } from "node:net";
 
@@ -36,6 +39,37 @@ const INTERNAL = (() => {
   b.addSubnet("172.30.32.0", 23, "ipv4");
   return b;
 })();
+
+/** The Supervisor's network, IPv4 and IPv6, as the agent port sees it. */
+export const SUPERVISOR_NETWORKS: readonly string[] = ["172.30.32.0/23", "fd0c:ac1e:2100::/48"];
+const SUPERVISOR = (() => {
+  const b = new BlockList();
+  b.addSubnet("172.30.32.0", 23, "ipv4");
+  b.addSubnet("fd0c:ac1e:2100::", 48, "ipv6");
+  return b;
+})();
+
+/**
+ * The entries of the allowed networks that name the Supervisor network or a part of it
+ * (172.30.32.0/23 or narrower, fd0c:ac1e:2100::/48 or narrower). A wider range that
+ * merely contains it, such as the default 172.16.0.0/12, does not count.
+ */
+export function supervisorListed(cidrs: readonly string[]): BlockList {
+  return networks(
+    cidrs.filter((cidr) => {
+      const [net, bits] = cidr.split("/");
+      const f = net === undefined ? undefined : family(net);
+      if (net === undefined || f === undefined) return false;
+      return SUPERVISOR.check(net, f) && Number(bits) >= (f === "ipv4" ? 23 : 48);
+    }),
+  );
+}
+
+/** What the agent port says when the port mapping hides the client. */
+export const HIDDEN_CLIENT_HELP =
+  "the host's port mapping hides the client's real address, so the agent port cannot tell your network from any other. " +
+  "Connect through the bridge over Home Assistant ingress instead, or add 172.30.32.0/23 to mcp_networks deliberately, " +
+  "knowing that only the agent token then protects the port";
 
 export interface Caller {
   /** The door: HA ingress, loopback (standalone), or the agent port with a token. */
@@ -107,12 +141,17 @@ export function checkAccess(
 }
 
 /** A refusal on the agent port carries its HTTP status: 403 network, 429 too many failures, 401 token. */
-export type AgentAccess = { ok: true; caller: Caller } | { ok: false; status: 401 | 403 | 429; reason: string };
+export type AgentAccess =
+  | { ok: true; caller: Caller }
+  /** `hidden`: the peer is the Supervisor network's, so the real client is unknown. */
+  | { ok: false; status: 401 | 403 | 429; reason: string; hidden?: true };
 
 /**
  * The agent port's check: the peer in the allowed networks (X-Forwarded-For is not
  * read here: nothing in front of this port appends it), not over its failed attempts,
- * and `Authorization: Bearer <agent token>` valid.
+ * and `Authorization: Bearer <agent token>` valid. A peer in the Supervisor network
+ * stands for a client the port mapping hid: refused unless `listed` (supervisorListed)
+ * names that network.
  */
 export function checkAgentAccess(
   peer: string | undefined,
@@ -120,10 +159,14 @@ export function checkAgentAccess(
   allowed: BlockList,
   tokens: { verify(token: string): { id: string; name: string } | undefined },
   limiter: { blocked(address: string): boolean; fail(address: string): void },
+  listed: BlockList = new BlockList(),
 ): AgentAccess {
   const address = plain(peer ?? "");
   const f = family(address);
   if (f === undefined || !allowed.check(address, f)) return { ok: false, status: 403, reason: `client ${address || "unknown"} is not in the allowed networks` };
+  if (SUPERVISOR.check(address, f) && !listed.check(address, f)) {
+    return { ok: false, status: 403, hidden: true, reason: `client ${address} is in the Supervisor network: ${HIDDEN_CLIENT_HELP}` };
+  }
   if (limiter.blocked(address)) return { ok: false, status: 429, reason: `too many failed attempts from ${address}: wait a few minutes` };
   const m = /^Bearer\s+(\S+)\s*$/i.exec(authorization ?? "");
   if (m === null) {

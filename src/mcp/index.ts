@@ -7,7 +7,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Hono } from "hono";
 import { createMCPToolRegistry, MCPToolResultFactory as Result, type MCPTool } from "@lambda-house/teob-ts/ai";
 import { createMCPServer, mcpHono } from "@lambda-house/teob-ts/mcp-server";
-import { checkAccess, checkAgentAccess, networks, type Caller } from "./access.js";
+import { checkAccess, checkAgentAccess, networks, supervisorListed, type Caller } from "./access.js";
 import type { AgentTokens, FailureLimiter } from "./agents.js";
 import type { ToolCalled } from "./journal.js";
 
@@ -49,6 +49,7 @@ export function mountMcp(app: Hono, deps: McpDeps): void {
 
 export function createMcp(deps: McpDeps): Mcp {
   const allowed = networks(deps.networks);
+  const listed = supervisorListed(deps.networks);
   const registry = createMCPToolRegistry();
   for (const t of deps.tools) {
     registry.register({
@@ -100,10 +101,14 @@ export function createMcp(deps: McpDeps): Mcp {
       });
     },
     mountAgents(app, door) {
+      // Said once in the log at warn, then at debug: every request from a hidden client is refused alike.
+      let hiddenWarned = false;
       mount(app, async (c, next) => {
-        const access = checkAgentAccess(peer(c), c.req.header("authorization"), allowed, door.tokens, door.limiter);
+        const access = checkAgentAccess(peer(c), c.req.header("authorization"), allowed, door.tokens, door.limiter, listed);
         if (!access.ok) {
-          deps.log("warn", `mcp (agent port): refused ${c.req.method} ${c.req.path}: ${access.reason}`);
+          const level = access.hidden && hiddenWarned ? "debug" : "warn";
+          if (access.hidden) hiddenWarned = true;
+          deps.log(level, `mcp (agent port): refused ${c.req.method} ${c.req.path}: ${access.reason}`);
           const message = access.status === 401 ? `unauthorized: ${access.reason}` : access.status === 429 ? `too many attempts: ${access.reason}` : `forbidden: ${access.reason}`;
           const headers: Record<string, string> = access.status === 401 ? { "www-authenticate": 'Bearer realm="teobeanie"' } : {};
           return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } }, access.status, headers);

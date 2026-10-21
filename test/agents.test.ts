@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { callerLabel } from "../src/mcp/access.js";
+import { DEFAULT_MCP_NETWORKS, callerLabel, supervisorListed } from "../src/mcp/access.js";
 import { createAgentTokens, createFailureLimiter, tokenName, type AccessEvent } from "../src/mcp/agents.js";
 import { createMcp, currentCaller } from "../src/mcp/index.js";
 import type { ToolCalled } from "../src/mcp/journal.js";
@@ -128,6 +128,7 @@ describe("the agent port", () => {
   async function setup(networks: readonly string[] = LAN) {
     const { tokens } = tokensIn();
     const recorded: Array<Omit<ToolCalled, "tag">> = [];
+    const logged: Array<[string, string]> = [];
     const mcp = createMcp({
       mode: "addon",
       networks,
@@ -142,14 +143,14 @@ describe("the agent port", () => {
       instructions: "test",
       version: "test",
       record: (c) => recorded.push(c),
-      log: () => {},
+      log: (level, msg) => logged.push([level, msg]),
     });
     const limiter = createFailureLimiter({ max: 8 });
     const app = agentApp((a) => mcp.mountAgents(a, { tokens, limiter }));
     const { token, info } = await tokens.mint("Claude Code on my laptop", "person:alex");
     const call = (body: unknown, peer: string, headers: Record<string, string> = {}, path = "/mcp", method = "POST") =>
       app.request(path, { method, ...(method === "POST" ? { body: JSON.stringify(body) } : {}), headers: { "content-type": "application/json", ...headers } }, env(peer));
-    return { tokens, token, info, recorded, call, mcp };
+    return { tokens, token, info, recorded, logged, call, mcp };
   }
   const whoami = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "whoami", arguments: {} } };
   const text = async (res: Response) => JSON.parse(((await res.json()) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as unknown;
@@ -214,6 +215,43 @@ describe("the agent port", () => {
     expect((await call(whoami, INGRESS, { ...auth, "x-forwarded-for": "192.168.1.20", "x-remote-user-name": "alex" })).status).toBe(403);
     const closed = await setup([]);
     expect((await closed.call(whoami, "192.168.1.20", { authorization: `Bearer ${closed.token}` })).status).toBe(403);
+  });
+
+  it("refuses the Supervisor network's gateway, which the port mapping may put in the client's place", async () => {
+    // The default networks contain 172.30.32.1 (in 172.16.0.0/12): the token alone would guard the port.
+    const { token, recorded, logged, call } = await setup(DEFAULT_MCP_NETWORKS);
+    const auth = { authorization: `Bearer ${token}` };
+    for (const peer of ["172.30.32.1", "::ffff:172.30.32.1", "172.30.33.200", "fd0c:ac1e:2100::1"]) {
+      const res = await call(whoami, peer, auth);
+      expect(res.status, peer).toBe(403);
+      const message = ((await res.json()) as { error: { message: string } }).error.message;
+      expect(message).toMatch(/^forbidden: client .* is in the Supervisor network/);
+      expect(message).toContain("port mapping hides the client's real address");
+      expect(message).toContain("ingress");
+      expect(message).toContain("add 172.30.32.0/23 to mcp_networks deliberately");
+      expect(message).toContain("only the agent token then protects the port");
+    }
+    expect(recorded).toEqual([]);
+    // One warning in the log; the next refusals of the same kind only at debug.
+    const hidden = logged.filter(([, m]) => m.includes("Supervisor network"));
+    expect(hidden.map(([level]) => level)).toEqual(["warn", "debug", "debug", "debug"]);
+    expect(hidden[0]![1]).toContain("port mapping hides the client's real address");
+    // The rest of 172.16.0.0/12 is still a LAN.
+    expect((await call(whoami, "172.16.0.5", auth)).status).toBe(200);
+  });
+
+  it("lets the Supervisor network in when the owner lists it, and only then", async () => {
+    for (const listed of [["172.30.32.0/23"], ["172.30.32.1/32"], ["fd0c:ac1e:2100::/48"]]) {
+      const { token, call } = await setup([...DEFAULT_MCP_NETWORKS, ...listed]);
+      const auth = { authorization: `Bearer ${token}` };
+      const peer = listed[0]!.includes(":") ? "fd0c:ac1e:2100::1" : "172.30.32.1";
+      expect((await call(whoami, peer, auth)).status, listed[0]).toBe(200);
+      expect((await call(whoami, peer, { authorization: "Bearer tbn_wrong" })).status, listed[0]).toBe(401);
+    }
+    // A wider range that merely contains it is not a listing.
+    const wide = await setup(["172.30.32.0/22"]);
+    expect((await wide.call(whoami, "172.30.32.1", { authorization: `Bearer ${wide.token}` })).status).toBe(403);
+    expect(supervisorListed(["172.16.0.0/12", "10.0.0.0/8", "fc00::/7"]).check("172.30.32.1", "ipv4")).toBe(false);
   });
 
   it("refuses an address after too many failures, even with a valid token", async () => {

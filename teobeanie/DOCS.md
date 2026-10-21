@@ -138,7 +138,7 @@ bridge are journaled with the Home Assistant user.
 | `monitor_ha_down_min` | Minutes Home Assistant may be unreachable before the chat is told (default 5) |
 | `time_zone` | The house's time zone (e.g. `America/New_York`) for time-of-day rules, the daily summary and local times; empty (the default) uses Home Assistant's |
 | `signal_retention_days` | Raw-signal ring retention (decisions are kept forever) |
-| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, on the agent port or through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
+| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, on the agent port or through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The Supervisor network (172.30.32.0/23) is let in on the agent port only when listed as itself (see [Network](#network)). The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
 | `shadow_mode` | Emergency switch: forces every instance to shadow, so nothing actuates (default off) |
 | `log_level` | Add-on log verbosity |
 
@@ -151,6 +151,20 @@ bridge are journaled with the Home Assistant user.
 The port speaks plain HTTP: on your LAN the token travels unencrypted, on your tailnet
 it is encrypted. Do not forward it to the internet. The panel and its API stay behind
 ingress only.
+
+The agent port checks the address of the machine that connects against `mcp_networks`.
+On Home Assistant OS the host's port mapping may hide that address: the add-on then
+sees the Supervisor network's gateway (172.30.32.1) for every client, from your LAN or
+from anywhere else. The default 172.16.0.0/12 contains that address, so the agent port
+refuses any client in the Supervisor network (172.30.32.0/23) with a 403 that says the
+port mapping hides the client's address, and logs it once. Two ways on:
+
+- Connect through the bridge over ingress (see [MCP tools for agents](#mcp-tools-for-agents)).
+  Home Assistant passes the real client address there.
+- Or add `172.30.32.0/23` to `mcp_networks` yourself. Do it knowing that the agent port
+  then lets in any address that reaches the host's port, and only the agent token
+  protects it. A wider range such as 172.16.0.0/12 does not count: the network has to
+  be listed as itself.
 
 ## Self-monitoring
 
