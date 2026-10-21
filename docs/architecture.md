@@ -73,7 +73,7 @@ Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DI
 | `monitor_alerts`, `monitor_ha_down_min`, `monitor_summary_time` | `true`, 5, off | self-monitoring |
 | `time_zone` | HA's | the house's zone: rules' `between`, replay, the House view's "today", the MCP tools, the monitor |
 | `signal_retention_days` | 30 | the signal store sweep |
-| `mcp_networks` | the private LAN ranges and Tailscale | the networks an MCP client may come from, on the agent port or through ingress; `MCP_NETWORKS` (comma-separated) overrides it |
+| `mcp_networks` | the private LAN ranges and Tailscale | the networks an MCP client may come from through ingress (the agent port is token-only); `MCP_NETWORKS` (comma-separated) overrides it |
 | `log_level` | `info` | |
 | `llm_provider`, `openrouter_api_key`, `openrouter_model`, `ollama_url`, `llm_monthly_budget_usd` | `none`, —, a default model, —, 10 | declared for the agent; nothing reads them yet (section 7) |
 
@@ -156,7 +156,7 @@ What is persisted per instance is the heuristic's own state, its timers, and its
 pending actions (rules: the desired value per entity, when it was last sent, which a
 user overrode, the condition tracking). What lives only in memory: rate-limit windows,
 the registry of the add-on's own outgoing calls, the HA user list, the registry caches,
-when each agent token was last used, the failed attempts per address on the agent port.
+when each agent token was last used, the failed attempts on the agent port.
 
 ### Recovery
 
@@ -348,7 +348,7 @@ this.
 | **Telegram Bot API** | out | `sendMessage` to the main and alerts chats; with the command lane, `setMyCommands` (the menu, scoped to the main chat), keyboards, `answerCallbackQuery`, `editMessageText` |
 | **Telegram Bot API** | in | `getUpdates` long poll for `/commands` and button presses from the main chat only; stale commands are refused, a second reader (409) is waited out |
 | **Agent port** (8199) | in | `/mcp` only, `Authorization: Bearer <agent token>`; every other path is a 404 |
-| **LAN, Tailscale** | in | the networks (`mcp_networks`) an MCP client may call the endpoint from, on the agent port or through ingress |
+| **LAN, Tailscale** | in | the networks (`mcp_networks`) an MCP client may call the endpoint from through ingress; the agent port takes any address with a valid token |
 | **GHCR** | out, CI | the add-on images on a version tag, once published |
 
 The surfaces, all behind ingress but MCP, which also has the agent port:
@@ -374,9 +374,14 @@ is journaled with its caller.
   Standalone, loopback only. The stdio bridge uses this door.
 - **The agent port** (8199): its own server (`agentApp` in `src/server.ts`) mounts
   `/mcp` and a 404 for everything else, so the panel, the read API and every write stay
-  behind ingress. The connection's peer must be in `mcp_networks` (no forwarded header
-  is read), must not be over its failed attempts (20 in ten minutes per address, then
-  429), and must send `Authorization: Bearer <agent token>`. A token is
+  behind ingress. It is token-only: every request must send `Authorization: Bearer
+  <agent token>`, and `mcp_networks` is not applied, because on Home Assistant OS the
+  host's port mapping shows every client as the Supervisor network's gateway
+  (172.30.32.1). A valid, unrevoked token is always served. Failed attempts are counted
+  per address and in all (20 and 100 in ten minutes); past either, a wrong token gets
+  429, and one whose id is unknown gets it before any hash is computed. All clients may
+  share one address, so a per-address lockout of valid tokens would let one bad client
+  lock out every agent. A token is
   `tbn_<id>_<secret>`, 32 random bytes; `/data/agent-tokens.json` keeps per token a
   random salt and `sha256(salt ‖ secret)`, compared in constant time (an unknown id is
   compared against a decoy, so it takes as long). Revoking removes the record at once.
@@ -629,7 +634,7 @@ src/
     clock.ts         local-time helpers
   packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts, suggest.ts (roles matched to the registry)
   house/             the House view: layout, summary, live service
-  mcp/               tools, ha-tools (explore all of HA), timeline (chain, signals, timeline), access (ingress peer, agent token, allowed networks), agents (agent tokens, teob-access stream), the mcp-audit stream
+  mcp/               tools, ha-tools (explore all of HA), timeline (chain, signals, timeline), access (ingress peer and allowed networks, agent token), agents (agent tokens, teob-access stream), the mcp-audit stream
   ha-registry.ts     HA's area, device and entity registries for the explore tools, refreshed on registry events
   studio/            cli (types, replay), house typings, file API
   audit.ts           the ha-audit aggregate; attribution.ts: who made each call

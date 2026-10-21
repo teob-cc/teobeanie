@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MCP_NETWORKS, callerLabel, supervisorListed } from "../src/mcp/access.js";
+import { callerLabel } from "../src/mcp/access.js";
 import { createAgentTokens, createFailureLimiter, tokenName, type AccessEvent } from "../src/mcp/agents.js";
 import { createMcp, currentCaller } from "../src/mcp/index.js";
 import type { ToolCalled } from "../src/mcp/journal.js";
@@ -63,6 +63,17 @@ describe("agent tokens", () => {
     expect(tokens.verify(token.replace(info.id, "000000000000"))).toBeUndefined();
     for (const bad of ["", "tbn_", "Bearer x", token + "x", token.toUpperCase()]) expect(tokens.verify(bad), bad).toBeUndefined();
     expect(tokens.verify(token)).toBeDefined();
+  });
+
+  it("tell a held id from an unknown one without hashing", async () => {
+    const { tokens } = tokensIn();
+    const { token, info } = await tokens.mint("agent", "local");
+    expect(tokens.known(token)).toBe(true);
+    expect(tokens.known(token.slice(0, -1) + (token.endsWith("A") ? "B" : "A"))).toBe(true); // the secret is not checked
+    expect(tokens.known(token.replace(info.id, "000000000000"))).toBe(false);
+    expect(tokens.known("tbn_wrong")).toBe(false);
+    await tokens.revoke(info.id, "local");
+    expect(tokens.known(token)).toBe(false);
   });
 
   it("start empty, without stopping the add-on, when the file cannot be read", async () => {
@@ -122,11 +133,23 @@ describe("failed attempts", () => {
     t = 61_000;
     expect(limiter.blocked("192.168.1.20")).toBe(false);
   });
+
+  it("block every address once all of them together pass the total", () => {
+    let t = 0;
+    const limiter = createFailureLimiter({ max: 3, maxTotal: 5, windowMs: 60_000, now: () => t });
+    for (let i = 0; i < 5; i++) limiter.fail(`192.168.1.${i}`);
+    expect(limiter.blocked("192.168.1.99")).toBe(true);
+    t = 61_000;
+    expect(limiter.blocked("192.168.1.99")).toBe(false);
+  });
 });
 
 describe("the agent port", () => {
   async function setup(networks: readonly string[] = LAN) {
-    const { tokens } = tokensIn();
+    const { tokens: held } = tokensIn();
+    // Counts the hash comparisons, to see that a tripped limiter refuses unknown ids without one.
+    let hashed = 0;
+    const tokens = { ...held, verify: (t: string) => (hashed++, held.verify(t)) };
     const recorded: Array<Omit<ToolCalled, "tag">> = [];
     const logged: Array<[string, string]> = [];
     const mcp = createMcp({
@@ -150,12 +173,12 @@ describe("the agent port", () => {
     const { token, info } = await tokens.mint("Claude Code on my laptop", "person:alex");
     const call = (body: unknown, peer: string, headers: Record<string, string> = {}, path = "/mcp", method = "POST") =>
       app.request(path, { method, ...(method === "POST" ? { body: JSON.stringify(body) } : {}), headers: { "content-type": "application/json", ...headers } }, env(peer));
-    return { tokens, token, info, recorded, logged, call, mcp };
+    return { tokens, token, info, recorded, logged, call, mcp, hashed: () => hashed };
   }
   const whoami = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "whoami", arguments: {} } };
   const text = async (res: Response) => JSON.parse(((await res.json()) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as unknown;
 
-  it("serves the tools to a valid token from an allowed network, journaling the agent as the caller", async () => {
+  it("serves the tools to a valid token, journaling the agent as the caller", async () => {
     const { token, info, recorded, call } = await setup();
     const auth = { authorization: `Bearer ${token}` };
     const init = await call({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }, "192.168.1.20", auth);
@@ -206,59 +229,51 @@ describe("the agent port", () => {
     expect(recorded).toHaveLength(1);
   });
 
-  it("refuses a client outside the allowed networks, whatever the token, and ignores forwarded addresses", async () => {
+  it("is token-only: any address with a valid token is served, mcp_networks is not applied", async () => {
+    // On Home Assistant OS every client arrives as the Supervisor network's gateway.
     const { token, call } = await setup();
     const auth = { authorization: `Bearer ${token}` };
-    expect((await call(whoami, "203.0.113.9", auth)).status).toBe(403);
-    expect((await call(whoami, "203.0.113.9", { ...auth, "x-forwarded-for": "192.168.1.20" })).status).toBe(403);
-    // The ingress gateway's address is no pass here: it is outside these networks.
-    expect((await call(whoami, INGRESS, { ...auth, "x-forwarded-for": "192.168.1.20", "x-remote-user-name": "alex" })).status).toBe(403);
+    for (const peer of ["172.30.32.1", "::ffff:172.30.32.1", "fd0c:ac1e:2100::1", "203.0.113.9", INGRESS]) {
+      expect((await call(whoami, peer, auth)).status, peer).toBe(200);
+      expect((await call(whoami, peer, { authorization: "Bearer tbn_wrong" })).status, peer).toBe(401);
+    }
+    // A forwarded address is not read: the caller is the connection's peer.
+    const res = await call(whoami, "172.30.32.1", { ...auth, "x-forwarded-for": "192.168.1.20" });
+    expect(await text(res)).toMatchObject({ via: "agent", address: "172.30.32.1" });
     const closed = await setup([]);
-    expect((await closed.call(whoami, "192.168.1.20", { authorization: `Bearer ${closed.token}` })).status).toBe(403);
+    expect((await closed.call(whoami, "172.30.32.1", { authorization: `Bearer ${closed.token}` })).status).toBe(200);
   });
 
-  it("refuses the Supervisor network's gateway, which the port mapping may put in the client's place", async () => {
-    // The default networks contain 172.30.32.1 (in 172.16.0.0/12): the token alone would guard the port.
-    const { token, recorded, logged, call } = await setup(DEFAULT_MCP_NETWORKS);
-    const auth = { authorization: `Bearer ${token}` };
-    for (const peer of ["172.30.32.1", "::ffff:172.30.32.1", "172.30.33.200", "fd0c:ac1e:2100::1"]) {
-      const res = await call(whoami, peer, auth);
-      expect(res.status, peer).toBe(403);
-      const message = ((await res.json()) as { error: { message: string } }).error.message;
-      expect(message).toMatch(/^forbidden: client .* is in the Supervisor network/);
-      expect(message).toContain("port mapping hides the client's real address");
-      expect(message).toContain("ingress");
-      expect(message).toContain("add 172.30.32.0/23 to mcp_networks deliberately");
-      expect(message).toContain("only the agent token then protects the port");
+  it("past the failure limit: a valid token gets through, invalid ones get 429, unknown ids without a hash", async () => {
+    const { tokens, token, info, call, logged, hashed } = await setup();
+    const mapped = "172.30.32.1";
+    const revoked = await tokens.mint("old laptop", "person:alex");
+    await tokens.revoke(revoked.info.id, "person:alex");
+    expect((await call(whoami, mapped, { authorization: `Bearer ${revoked.token}` })).status).toBe(401);
+    for (let i = 0; i < 7; i++) expect((await call(whoami, mapped, { authorization: "Bearer tbn_wrong" })).status).toBe(401);
+    // Tripped (8 failures): the same address, and the one every agent shares.
+    const before = hashed();
+    for (const bad of ["Bearer tbn_wrong", `Bearer ${revoked.token}`, `Bearer ${token.replace(info.id, "000000000000")}`]) {
+      const res = await call(whoami, mapped, { authorization: bad });
+      expect(res.status, bad).toBe(429);
+      expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(/^too many attempts/);
     }
-    expect(recorded).toEqual([]);
-    // One warning in the log; the next refusals of the same kind only at debug.
-    const hidden = logged.filter(([, m]) => m.includes("Supervisor network"));
-    expect(hidden.map(([level]) => level)).toEqual(["warn", "debug", "debug", "debug"]);
-    expect(hidden[0]![1]).toContain("port mapping hides the client's real address");
-    // The rest of 172.16.0.0/12 is still a LAN.
-    expect((await call(whoami, "172.16.0.5", auth)).status).toBe(200);
-  });
-
-  it("lets the Supervisor network in when the owner lists it, and only then", async () => {
-    for (const listed of [["172.30.32.0/23"], ["172.30.32.1/32"], ["fd0c:ac1e:2100::/48"]]) {
-      const { token, call } = await setup([...DEFAULT_MCP_NETWORKS, ...listed]);
-      const auth = { authorization: `Bearer ${token}` };
-      const peer = listed[0]!.includes(":") ? "fd0c:ac1e:2100::1" : "172.30.32.1";
-      expect((await call(whoami, peer, auth)).status, listed[0]).toBe(200);
-      expect((await call(whoami, peer, { authorization: "Bearer tbn_wrong" })).status, listed[0]).toBe(401);
-    }
-    // A wider range that merely contains it is not a listing.
-    const wide = await setup(["172.30.32.0/22"]);
-    expect((await wide.call(whoami, "172.30.32.1", { authorization: `Bearer ${wide.token}` })).status).toBe(403);
-    expect(supervisorListed(["172.16.0.0/12", "10.0.0.0/8", "fc00::/7"]).check("172.30.32.1", "ipv4")).toBe(false);
-  });
-
-  it("refuses an address after too many failures, even with a valid token", async () => {
-    const { token, call } = await setup();
-    for (let i = 0; i < 8; i++) expect((await call(whoami, "192.168.1.30", { authorization: "Bearer tbn_wrong" })).status).toBe(401);
-    expect((await call(whoami, "192.168.1.30", { authorization: `Bearer ${token}` })).status).toBe(429);
+    expect((await call(whoami, mapped, {})).status).toBe(429);
+    expect(hashed()).toBe(before);
+    // A wrong secret for a held id is compared (in constant time), then refused alike.
+    expect((await call(whoami, mapped, { authorization: `Bearer ${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}` })).status).toBe(429);
+    expect(hashed()).toBe(before + 1);
+    expect((await call(whoami, mapped, { authorization: `Bearer ${token}` })).status).toBe(200);
     expect((await call(whoami, "192.168.1.31", { authorization: `Bearer ${token}` })).status).toBe(200);
+    // Past the limit the refusals are logged at debug only.
+    expect(logged.filter(([l, m]) => l !== "debug" && m.includes("too many"))).toEqual([]);
+  });
+
+  it("refuses a revoked token with 401 below the limit", async () => {
+    const { tokens, token, info, call } = await setup();
+    expect((await call(whoami, "172.30.32.1", { authorization: `Bearer ${token}` })).status).toBe(200);
+    await tokens.revoke(info.id, "person:alex");
+    expect((await call(whoami, "172.30.32.1", { authorization: `Bearer ${token}` })).status).toBe(401);
   });
 
   it("over a real socket: the peer is the connection's own address", async () => {
@@ -292,9 +307,10 @@ describe("the agent port", () => {
     } finally {
       loopback.close();
     }
+    // The networks are not applied on this port: the token alone decides.
     const lanOnly = await open(LAN);
     try {
-      expect((await post(lanOnly.url, `Bearer ${token}`)).status).toBe(403);
+      expect((await post(lanOnly.url, `Bearer ${token}`)).status).toBe(200);
     } finally {
       lanOnly.close();
     }

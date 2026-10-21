@@ -7,11 +7,10 @@
 // tailnet, never from a public address. Standalone, only loopback may connect.
 //
 // The second door is the add-on's own port (8199, agents.ts): it serves only /mcp, and
-// every request carries an agent token minted in the panel. There the client is the
-// connection's peer itself, which must be in the same networks. On Home Assistant OS the
-// host's port mapping may hide that peer behind the Supervisor network's gateway
-// (172.30.32.1), which the default 172.16.0.0/12 contains: a peer inside the Supervisor
-// network is refused unless the owner lists that network itself (supervisorListed).
+// every request carries an agent token minted in the panel. The token alone guards it:
+// on Home Assistant OS the host's port mapping shows every client as the Supervisor
+// network's gateway (172.30.32.1), so the port cannot tell the LAN from anywhere else,
+// and `mcp_networks` is not applied there.
 
 import { BlockList, isIP } from "node:net";
 
@@ -39,37 +38,6 @@ const INTERNAL = (() => {
   b.addSubnet("172.30.32.0", 23, "ipv4");
   return b;
 })();
-
-/** The Supervisor's network, IPv4 and IPv6, as the agent port sees it. */
-export const SUPERVISOR_NETWORKS: readonly string[] = ["172.30.32.0/23", "fd0c:ac1e:2100::/48"];
-const SUPERVISOR = (() => {
-  const b = new BlockList();
-  b.addSubnet("172.30.32.0", 23, "ipv4");
-  b.addSubnet("fd0c:ac1e:2100::", 48, "ipv6");
-  return b;
-})();
-
-/**
- * The entries of the allowed networks that name the Supervisor network or a part of it
- * (172.30.32.0/23 or narrower, fd0c:ac1e:2100::/48 or narrower). A wider range that
- * merely contains it, such as the default 172.16.0.0/12, does not count.
- */
-export function supervisorListed(cidrs: readonly string[]): BlockList {
-  return networks(
-    cidrs.filter((cidr) => {
-      const [net, bits] = cidr.split("/");
-      const f = net === undefined ? undefined : family(net);
-      if (net === undefined || f === undefined) return false;
-      return SUPERVISOR.check(net, f) && Number(bits) >= (f === "ipv4" ? 23 : 48);
-    }),
-  );
-}
-
-/** What the agent port says when the port mapping hides the client. */
-export const HIDDEN_CLIENT_HELP =
-  "the host's port mapping hides the client's real address, so the agent port cannot tell your network from any other. " +
-  "Connect through the bridge over Home Assistant ingress instead, or add 172.30.32.0/23 to mcp_networks deliberately, " +
-  "knowing that only the agent token then protects the port";
 
 export interface Caller {
   /** The door: HA ingress, loopback (standalone), or the agent port with a token. */
@@ -140,43 +108,35 @@ export function checkAccess(
   return { ok: true, caller: { via: "ingress", address, ...(user ? { user } : {}), ...(userId ? { userId } : {}) } };
 }
 
-/** A refusal on the agent port carries its HTTP status: 403 network, 429 too many failures, 401 token. */
-export type AgentAccess =
-  | { ok: true; caller: Caller }
-  /** `hidden`: the peer is the Supervisor network's, so the real client is unknown. */
-  | { ok: false; status: 401 | 403 | 429; reason: string; hidden?: true };
+/** A refusal on the agent port carries its HTTP status: 401 token, 429 too many failures. */
+export type AgentAccess = { ok: true; caller: Caller } | { ok: false; status: 401 | 429; reason: string };
 
 /**
- * The agent port's check: the peer in the allowed networks (X-Forwarded-For is not
- * read here: nothing in front of this port appends it), not over its failed attempts,
- * and `Authorization: Bearer <agent token>` valid. A peer in the Supervisor network
- * stands for a client the port mapping hid: refused unless `listed` (supervisorListed)
- * names that network.
+ * The agent port's check: `Authorization: Bearer <agent token>`, and nothing about the
+ * network. A valid, unrevoked token is always served, even while the limiter is
+ * tripped: every client may arrive from the same address, so one bad client must not
+ * lock out the good ones. Failed attempts are counted; past the limit a token whose id
+ * is unknown is refused with 429 before any hash is computed, and a known id with a
+ * wrong secret, after the constant-time comparison, with 429 too.
  */
 export function checkAgentAccess(
   peer: string | undefined,
   authorization: string | undefined,
-  allowed: BlockList,
-  tokens: { verify(token: string): { id: string; name: string } | undefined },
+  tokens: { known(token: string): boolean; verify(token: string): { id: string; name: string } | undefined },
   limiter: { blocked(address: string): boolean; fail(address: string): void },
-  listed: BlockList = new BlockList(),
 ): AgentAccess {
-  const address = plain(peer ?? "");
-  const f = family(address);
-  if (f === undefined || !allowed.check(address, f)) return { ok: false, status: 403, reason: `client ${address || "unknown"} is not in the allowed networks` };
-  if (SUPERVISOR.check(address, f) && !listed.check(address, f)) {
-    return { ok: false, status: 403, hidden: true, reason: `client ${address} is in the Supervisor network: ${HIDDEN_CLIENT_HELP}` };
-  }
-  if (limiter.blocked(address)) return { ok: false, status: 429, reason: `too many failed attempts from ${address}: wait a few minutes` };
+  const address = plain(peer ?? "") || "unknown";
+  const blocked = limiter.blocked(address);
+  const tooMany = { ok: false, status: 429, reason: "too many failed attempts: wait a few minutes" } as const;
   const m = /^Bearer\s+(\S+)\s*$/i.exec(authorization ?? "");
   if (m === null) {
     limiter.fail(address);
-    return { ok: false, status: 401, reason: "an agent token is needed: Authorization: Bearer <token> (mint one on the panel's Connect page)" };
+    return blocked ? tooMany : { ok: false, status: 401, reason: "an agent token is needed: Authorization: Bearer <token> (mint one on the panel's Connect page)" };
   }
-  const token = tokens.verify(m[1]!);
+  const token = blocked && !tokens.known(m[1]!) ? undefined : tokens.verify(m[1]!);
   if (token === undefined) {
     limiter.fail(address);
-    return { ok: false, status: 401, reason: "the agent token is not valid, or was revoked" };
+    return blocked ? tooMany : { ok: false, status: 401, reason: "the agent token is not valid, or was revoked" };
   }
   return { ok: true, caller: { via: "agent", agent: token.name, tokenId: token.id, address } };
 }

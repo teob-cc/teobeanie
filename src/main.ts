@@ -495,7 +495,7 @@ const mcpNetworks = resolveMcpNetworks(process.env.MCP_NETWORKS, config.options.
     return false;
   }
 });
-log("info", `mcp: clients allowed from ${mcpNetworks.length > 0 ? mcpNetworks.join(", ") : "nowhere (no networks configured)"}`);
+log("info", `mcp: ingress clients allowed from ${mcpNetworks.length > 0 ? mcpNetworks.join(", ") : "nowhere (no networks configured)"}`);
 // One MCP server, two doors: HA ingress on :8099, and the agent port with agent tokens
 // minted on the panel's Connect page (hashes in /data, mints and revocations journaled).
 const mcp = createMcp({
@@ -594,6 +594,7 @@ const agentServer = startAgentServer((app) => mcp.mountAgents(app, { tokens: age
   log("error", `mcp: the agent port ${agentPort} could not be opened: ${err.message}`),
 );
 log("info", `mcp: agent port listening on :${agentPort} (/mcp only, agent tokens: ${agentTokens.list().length})`);
+log("info", "mcp: the agent port is token-only; it cannot see client addresses behind the host's port mapping");
 
 let shuttingDown = false;
 const shutdown = (): void => {

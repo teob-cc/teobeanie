@@ -58,10 +58,9 @@ When the tools are missing or fail:
 | No `teobeanie` tools at all | The MCP server is not added. Steps 2 and 3 of `docs/getting-started.md`: the panel's **Connect** page mints a token and shows the line to run |
 | `unauthorized: …` (401) | The agent token was revoked or mistyped. The owner mints a new one on the Connect page; run `claude mcp remove teobeanie`, then the new line |
 | Connection refused, or a timeout, on port 8199 | The address is not reachable from this machine, or the agent port is closed or moved (the add-on's Configuration tab → **Network**) |
-| `too many attempts` (429) | Too many wrong tokens from this address. Wait ten minutes |
+| `too many attempts` (429) | Too many wrong tokens were tried lately, and this one is not valid either. Check the token, or wait ten minutes. A valid token is always served |
 | The bridge (the fallback) says "no Teobeanie add-on is installed" or "several Teobeanie add-ons" | Add `-e ADDON=<slug>` to `claude mcp add` (the slug is in the add-on page's URL, such as `abcd1234_teobeanie`) |
-| `forbidden: client 172.30.32.1 is in the Supervisor network` | The host's port mapping hides the client's address. The owner picks: the bridge through ingress (the fallback in `docs/getting-started.md`), or `172.30.32.0/23` added to `mcp_networks` on purpose, so that only the token protects the port. Do not choose for them |
-| `forbidden: client … is not in the allowed networks` | The client's address is outside the add-on's `mcp_networks` option. The owner adds their network there and restarts the add-on |
+| The bridge says `forbidden: client … is not in the allowed networks` | The client's address is outside the add-on's `mcp_networks` option (ingress only; the agent port does not use it). The owner adds their network there and restarts the add-on |
 | The bridge says Home Assistant rejected the token | Make a new long-lived token (profile → Security) and save it to the file again |
 
 ## 2. Explore Home Assistant, read-only

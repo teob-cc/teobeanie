@@ -24,7 +24,7 @@ export interface AddonOptions {
   /** The house's IANA time zone, overriding Home Assistant's; empty: HA's. */
   time_zone: string;
   signal_retention_days: number;
-  /** CIDRs MCP clients may reach the tools from, on the agent port or through ingress (LAN and tailnet by default; empty: MCP closed). */
+  /** CIDRs MCP clients may reach the tools from through ingress (LAN and tailnet by default; empty: MCP over ingress closed). The agent port is token-only. */
   mcp_networks: string[];
   shadow_mode: boolean;
   log_level: "debug" | "info" | "warning" | "error";

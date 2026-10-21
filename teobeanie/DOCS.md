@@ -89,10 +89,11 @@ behaviour packages whose roles your entities fill, pre-bound). They only read, a
 nothing they read is recorded; the calls are journaled like the others. With them an
 agent needs no Home Assistant MCP server of its own.
 
-There are two ways in, and both accept only clients from the `mcp_networks`: by
-default the private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7,
-fe80::/10) and Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is
-refused unless you add its network.
+There are two ways in. The agent port is protected by the agent token alone (see
+[Network](#network)). Ingress accepts only clients from the `mcp_networks`: by default
+the private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, fe80::/10)
+and Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is refused there
+unless you add its network.
 
 **The agent port** (8199, see [Network](#network)) serves `/mcp` and nothing else. Each
 request needs `Authorization: Bearer <agent token>`. Mint a token on the panel's
@@ -106,8 +107,9 @@ claude mcp add --transport http teobeanie http://homeassistant.local:8199/mcp \
 Every call is journaled with the caller `agent:<token name>`. Only a salted hash of
 each token is kept (in `/data`). Revoking a token on the Connect page refuses it from
 the next request on. Minting and revoking are journaled with who did it, and only an
-admin's panel session (through ingress) can do either. Too many wrong tokens from one
-address are refused for ten minutes.
+admin's panel session (through ingress) can do either. After too many wrong tokens
+(20 from one address, or 100 in all, in ten minutes) further wrong ones get 429 for a
+while; a valid token is always served.
 
 **Home Assistant ingress** is the fallback: Home Assistant authenticates the request.
 A local MCP client that speaks only stdio connects through
@@ -139,7 +141,7 @@ bridge are journaled with the Home Assistant user.
 | `monitor_ha_down_min` | Minutes Home Assistant may be unreachable before the chat is told (default 5) |
 | `time_zone` | The house's time zone (e.g. `America/New_York`) for time-of-day rules, the daily summary and local times; empty (the default) uses Home Assistant's |
 | `signal_retention_days` | Raw-signal ring retention (decisions are kept forever) |
-| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, on the agent port or through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The Supervisor network (172.30.32.0/23) is let in on the agent port only when listed as itself (see [Network](#network)). The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
+| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP through ingress is closed. The agent port does not use it: the token alone protects that port (see [Network](#network)). The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
 | `shadow_mode` | Emergency switch: forces every instance to shadow, so nothing actuates (default off) |
 | `log_level` | Add-on log verbosity |
 
@@ -153,19 +155,12 @@ The port speaks plain HTTP: on your LAN the token travels unencrypted, on your t
 it is encrypted. Do not forward it to the internet. The panel and its API stay behind
 ingress only.
 
-The agent port checks the address of the machine that connects against `mcp_networks`.
-On Home Assistant OS the host's port mapping may hide that address: the add-on then
-sees the Supervisor network's gateway (172.30.32.1) for every client, from your LAN or
-from anywhere else. The default 172.16.0.0/12 contains that address, so the agent port
-refuses any client in the Supervisor network (172.30.32.0/23) with a 403 that says the
-port mapping hides the client's address, and logs it once. Two ways on:
-
-- Connect through the bridge over ingress (see [MCP tools for agents](#mcp-tools-for-agents)).
-  Home Assistant passes the real client address there.
-- Or add `172.30.32.0/23` to `mcp_networks` yourself. Do it knowing that the agent port
-  then lets in any address that reaches the host's port, and only the agent token
-  protects it. A wider range such as 172.16.0.0/12 does not count: the network has to
-  be listed as itself.
+The agent port is protected by the agent token alone. It does not check where a client
+comes from: on Home Assistant OS the host's port mapping shows every client as the same
+address, so the port cannot tell your LAN from anywhere else. Anyone who can reach the
+port can try tokens. A token is 256 bits of randomness, one per agent, and revocable on
+the Connect page. The tools are read-only: no device control. If you do not use the
+port, close it here.
 
 ## Self-monitoring
 

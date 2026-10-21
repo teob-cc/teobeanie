@@ -1,5 +1,5 @@
 name: Teobeanie
-version: "0.3.0"
+version: "0.3.1"
 slug: teobeanie
 description: Behaviours for Home Assistant as tested pure functions, with a journal of every decision, built with your own AI agent over MCP
 url: https://github.com/teob-cc/teobeanie
@@ -14,7 +14,9 @@ ingress: true
 panel_icon: mdi:home-lightning-bolt
 panel_title: Teobeanie
 # The agent port: /mcp only, for AI agents with a token minted on the panel's Connect
-# page. The owner can change the host port, or disable it, in the Network section.
+# page. Token-only: behind the host's port mapping it cannot see client addresses, so
+# mcp_networks does not apply to it. The owner can change the host port, or disable
+# it, in the Network section.
 ports:
   8199/tcp: 8199
 ports_description:
@@ -31,6 +33,7 @@ options:
   monitor_alerts: true
   monitor_ha_down_min: 5
   signal_retention_days: 30
+  # Ingress only: the networks an MCP client may come from through Home Assistant ingress.
   mcp_networks:
     - 10.0.0.0/8
     - 172.16.0.0/12

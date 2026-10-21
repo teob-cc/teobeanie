@@ -7,8 +7,9 @@
 // memory only.
 //
 // A token reads `tbn_<id>_<secret>`: the id finds the stored hash, the secret is 32
-// random bytes. Hashes are compared in constant time. Failed attempts are limited per
-// client address.
+// random bytes. Hashes are compared in constant time. Failed attempts are counted per
+// client address and in all; past the limit an invalid token gets 429, and a valid one
+// is still served (the port may see every client as one address).
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -104,6 +105,8 @@ export interface AgentTokens {
   revoke(id: string, by: string): Promise<boolean>;
   /** The token's record when the token is valid (and its last use set to now). */
   verify(token: string): AgentTokenInfo | undefined;
+  /** Shaped like a token and its id is one we hold: no hash is computed. */
+  known(token: string): boolean;
 }
 
 export const MAX_NAME = 80;
@@ -191,6 +194,11 @@ export function createAgentTokens(deps: {
       return true;
     },
 
+    known(token) {
+      const m = TOKEN.exec(token);
+      return m !== null && tokens.has(m[1]!);
+    },
+
     verify(token) {
       const m = TOKEN.exec(token);
       const stored = m === null ? undefined : tokens.get(m[1]!);
@@ -207,30 +215,37 @@ export function createAgentTokens(deps: {
 // ---- failed attempts ----
 
 export interface FailureLimiter {
-  /** Whether the address has failed too often lately. */
+  /** Whether the address, or all clients together, failed too often lately. */
   blocked(address: string): boolean;
   fail(address: string): void;
 }
 
-/** At most `max` failed attempts per address in `windowMs`; then refused until the oldest leaves the window. */
-export function createFailureLimiter(opts: { max?: number; windowMs?: number; now?: () => number } = {}): FailureLimiter {
+/**
+ * At most `max` failed attempts per address, and `maxTotal` from all addresses, in
+ * `windowMs`; past either, blocked until the oldest leaves the window. Blocked only
+ * stops invalid tokens (access.ts): a valid one is always served.
+ */
+export function createFailureLimiter(opts: { max?: number; maxTotal?: number; windowMs?: number; now?: () => number } = {}): FailureLimiter {
   const max = opts.max ?? 20;
+  const maxTotal = opts.maxTotal ?? 100;
   const windowMs = opts.windowMs ?? 10 * 60_000;
   const now = opts.now ?? Date.now;
+  const ALL = "\u0000all";
   const failures = new Map<string, number[]>();
-  const recent = (address: string): number[] => {
+  const recent = (key: string): number[] => {
     const cut = now() - windowMs;
-    const kept = (failures.get(address) ?? []).filter((t) => t > cut);
-    if (kept.length === 0) failures.delete(address);
-    else failures.set(address, kept);
+    const kept = (failures.get(key) ?? []).filter((t) => t > cut);
+    if (kept.length === 0) failures.delete(key);
+    else failures.set(key, kept);
     return kept;
   };
   return {
-    blocked: (address) => recent(address).length >= max,
+    blocked: (address) => recent(address).length >= max || recent(ALL).length >= maxTotal,
     fail(address) {
       // Many addresses at once: forget the stale ones rather than grow.
       if (failures.size > 10_000) for (const a of [...failures.keys()]) recent(a);
       failures.set(address, [...recent(address), now()].slice(-max));
+      failures.set(ALL, [...recent(ALL), now()].slice(-maxTotal));
     },
   };
 }

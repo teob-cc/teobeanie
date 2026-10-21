@@ -120,8 +120,9 @@ them.
 ## Agent tokens
 
 - The agent port (8199) serves the MCP endpoint and nothing else: no panel, no API.
-  Every request needs a valid agent token, from an address in the add-on's
-  `mcp_networks` option (the private LAN ranges and Tailscale by default).
+  Every request needs a valid agent token, and the token alone protects the port: it
+  cannot see your machine's address behind the host's port mapping. Close the port
+  if you do not use it.
 - Teobeanie keeps only a salted hash of each token. Lost the token? Revoke it and mint
   a new one.
 - **Revoke** on the Connect page refuses the token from the agent's next request on.
@@ -152,10 +153,9 @@ the bridge are journaled with your Home Assistant user.
 |---|---|
 | The agent cannot connect to port 8199 | The address is one your agent's machine cannot reach, or the port is closed or moved: check **Network** on the add-on's Configuration tab, and the address on the Connect page |
 | MCP refused: `unauthorized: …` (401) | The token was revoked, or mistyped. Mint a new one on the Connect page and run the new line (`claude mcp remove teobeanie` first) |
-| MCP refused: `too many attempts` (429) | Too many wrong tokens from your address. Wait ten minutes |
+| MCP refused: `too many attempts` (429) | Too many wrong tokens were tried lately, and yours is not valid either. Check the token; wait ten minutes. A valid token is always served |
 | The bridge cannot find the add-on ("no Teobeanie add-on is installed", "several Teobeanie add-ons") | Name it: add `-e ADDON=<slug>` to `claude mcp add`. The slug is in the add-on page's address, such as `abcd1234_teobeanie` |
-| MCP refused: `forbidden: client 172.30.32.1 is in the Supervisor network` (403) | The host's port mapping hides your machine's address from the add-on, so the agent port cannot check it. Use the bridge through ingress ([Fallback](#fallback-the-bridge-through-ingress)), or add `172.30.32.0/23` to the add-on's `mcp_networks` option and restart, knowing that only the agent token then protects the port ([Network](../teobeanie/DOCS.md#network)) |
-| MCP refused: `forbidden: client … is not in the allowed networks` (403) | Your machine's address is outside the add-on's `mcp_networks` option (default: the private LAN ranges and Tailscale). Add your network there and restart the add-on |
+| The bridge refused: `forbidden: client … is not in the allowed networks` (403) | Your machine's address is outside the add-on's `mcp_networks` option (default: the private LAN ranges and Tailscale), which applies to ingress only. Add your network there and restart the add-on |
 | Home Assistant rejected the token | Make a new long-lived token and save it to the file again |
 | A reload was rejected after a push | The add-on keeps the previous config. The reason is in the add-on's log (Settings → Add-ons → Teobeanie → Log) and on the panel's Heuristics tab. Fix the file, commit, push again |
 | An instance stays in shadow after "active" | Someone turned the add-on's `shadow_mode` emergency switch on. Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
