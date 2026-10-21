@@ -11,12 +11,16 @@ or better on the house's own history, and only then move control over: one flow 
 time, reversibly, watched.
 
 Background: `${CLAUDE_PLUGIN_ROOT}/docs/heuristics.md` (patterns, rules, modes, replay,
-"Porting from Node-RED"). The working copy, the sync script and the Teobeanie clone
-(`WC`, `SYNC`, `TB`) are set up as in the `develop` skill; going active follows the
-`operate` skill. The two scripts of this skill are in
-`${CLAUDE_PLUGIN_ROOT}/skills/nodered-migration/scripts/` (below: `NR`). They read
-`HA_URL` and `HA_TOKEN`; pass the token from its file inside the command,
-`HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)"`, never print it.
+"Porting from Node-RED"). Teobeanie's side goes through its MCP tools: the scope, the
+instance in shadow, the specs and the replay as in the `develop` skill, going active
+as in the `operate` skill. Node-RED's side goes through the two scripts of this skill,
+in `${CLAUDE_PLUGIN_ROOT}/skills/nodered-migration/scripts/` (below: `NR`).
+
+The scripts talk to Home Assistant itself, so they need a Home Assistant token: a
+long-lived token of an administrator in `~/.config/teobeanie/ha-token` ("The command
+line needs a Home Assistant token" in `docs/getting-started.md`). Ask the owner for it
+when you get to step 1. They read `HA_URL` and `HA_TOKEN`; pass the token from its file
+inside the command, `HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)"`, never print it.
 
 ## Ground rules
 
@@ -25,9 +29,9 @@ Background: `${CLAUDE_PLUGIN_ROOT}/docs/heuristics.md` (patterns, rules, modes, 
   the public Teobeanie repository. Tests and examples there use made-up names.
 - **Ask before touching Node-RED.** Name the exact node ids to disable and what they do;
   wait for a yes per batch. Never delete nodes during a migration — disable.
-- **One push per step:** the scope, a house package and the instance that needs them
-  go to the box together. The reload checks them as one, all or nothing, and an
-  instance outside the scope is refused.
+- **Scope before the instance:** the reload refuses an instance that watches or
+  switches an entity outside the scope, and nothing changes. `scope_add` (and, on the
+  owner's yes, `scope_operate`) first, then `instance_upsert`.
 - **Keep everything reversible:** every flow has a written rollback (instance back to
   shadow + the node ids to re-enable).
 
@@ -72,28 +76,25 @@ from `last_changed` (`heldSince`), not from boot.
 
 ## 3. Scope and shadow
 
-Add the instance to `heuristics.json` with `"mode": "shadow"`; add its entities to
-`allowlist.json` (`"operate": true` only for what it actuates). Push it (`$SYNC push
-$WC`, after specs and a commit, as in the `develop` skill). The add-on
-option `shadow_mode` (an emergency switch, default false) forces every instance to shadow
+`scope_add` for each entity the instance watches or reads; `scope_operate` with the
+reason for each it switches, after the owner's yes. Then `instance_upsert` with
+`mode: "shadow"`, and `test_run` for its package. A house package of its own starts
+with `package_scaffold`, specs first (the `develop` skill). The add-on option
+`shadow_mode` (an emergency switch, default false) forces every instance to shadow
 regardless of the file; if it is on, the owner turns it off before an instance can act.
 
-Shadow journals `ActionSuppressed` rows: what Teobeanie would have done. Unit-test new
-parameters with `simulate()` first (made-up entity names).
+Shadow journals `ActionSuppressed` rows: what Teobeanie would have done. New parameters
+get a spec with `simulate()` first (made-up entity names).
 
 ## 4. Prove parity on history
 
-```sh
-cd $TB && HA_URL=... HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)" \
-  node dist/studio/cli.js replay $WC <heuristic>/<id> --replaces Supervisor --days 7
-```
+`replay` with `instance: "<heuristic>/<id>"`, `days: 7` and `replaces: "Supervisor"`.
 
-- Node-RED calls HA as the system user **Supervisor**. `--replaces Supervisor` drops its
+- Node-RED calls HA as the system user **Supervisor**. `replaces: "Supervisor"` drops its
   recorded switches and lets Teobeanie drive, then compares: both / only Teobeanie / only Node-RED.
 - Live shadow is **blind** for a heuristic that reads its own targets: Node-RED switches
   first, so Teobeanie sees the light already on and stays quiet. Judge those by replay, use
   live shadow only for runtime health.
-- HA's `/api/logbook/<start>` returns ONE day unless `end_time` is given.
 - Explain every "Teobeanie only" / "house only" (Node-RED) row before cutting over; most are
   improvements (no re-sends, both-sensors rule) — write them down.
 
@@ -103,9 +104,10 @@ cd $TB && HA_URL=... HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)" \
 2. Disable the **effect** nodes (the call-service / sender), not shared triggers:
    `node $NR/nodered.mjs disable <id>...` (backs the flows up, deploys only those
    nodes, reads them back). Same seconds:
-3. Set the instance `"mode": "active"` in the working copy's `heuristics.json`, commit,
-   `$SYNC push $WC` (the `operate` skill: one mode per push, the `shadow_mode` switch
-   must be off).
+3. `instance_mode` with the instance's `key` and `mode: "active"` (the `operate` skill:
+   the rollback revision named first, one instance per step, the `shadow_mode` switch
+   must be off). Its specs must pass and it must have decided in shadow within the last
+   day, or the add-on refuses.
 4. Start a watcher and keep it running for at least a day:
    `node $NR/cutover-watch.mjs <heuristic>/<id> <entities...> >> cutover.log`
    It prints Teobeanie's decisions and calls, state changes with who made them (Teobeanie, a
@@ -115,7 +117,7 @@ cd $TB && HA_URL=... HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)" \
    chat by itself; the watcher adds the per-event detail.
 5. Record the time, node ids and rollback in the private inventory.
 
-Rollback: instance back to `"shadow"` + push, `node $NR/nodered.mjs enable <ids>`.
+Rollback: `instance_mode` with `mode: "shadow"`, then `node $NR/nodered.mjs enable <ids>`.
 
 ## 6. Watch the first real uses
 

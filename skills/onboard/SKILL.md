@@ -10,13 +10,15 @@ would see it. They have picked one to three first behaviours from the starter pa
 And nothing in the house or in Teobeanie's config has changed. Building the picked
 behaviours is the `develop` skill's job.
 
-Teobeanie is alpha (0.2). Its MCP tools are read-only. The config folder is edited as
-files. Behaviours run in shadow until the owner says otherwise.
+Teobeanie is alpha (0.3). Onboarding uses only its read tools; the develop and operate
+tools are for the next skills. Behaviours run in shadow until the owner says otherwise.
 
 ## Rules
 
-- **Read only.** Explore through the `teobeanie` MCP tools. None of them can call a
-  service, and what they read outside the house scope is not recorded. Never call a
+- **Read only.** Explore through the `teobeanie` MCP tools that read (the client marks
+  them read-only). None of Teobeanie's tools can call a service, and what they read
+  outside the house scope is not recorded. Onboarding calls none of the tools that
+  write. Never call a
   Home Assistant service yourself, over REST or the websocket, and never write to the
   Supervisor. *Why:* onboarding comes before any trust. One stray call switches a real
   light in a real house.
@@ -132,19 +134,15 @@ Then ask which ones to set up. None is a fine answer.
 
 ## 5. Hand over to develop
 
-For the picked ones, the `develop` skill does the work: a git working copy of the
-config folder, the scope, the instances in shadow, their specs, a replay of the last
-days, the push, and the first shadow decisions. Before handing over, check what it
-needs and ask before each:
+For the picked ones, the `develop` skill does the work over the same MCP connection:
+the scope, the instances in shadow, their specs, a replay of the last days, and the
+first shadow decisions. Each step is one revision of the add-on's config, which the
+owner can see on the panel's Heuristics tab and roll back. It needs no SSH and no Home
+Assistant token: the agent token is enough. Say before each change what it does, and
+ask.
 
-- the **Terminal & SSH** add-on with the owner's public key
-  (`ssh -o BatchMode=yes root@homeassistant.local true` succeeds);
-- Node.js 22.18 or later and pnpm, for the specs and replay;
-- a folder for the working copy (a private git repository, never a public one);
-- a long-lived Home Assistant token of an administrator in
-  `~/.config/teobeanie/ha-token`, for the house typings and replay only ("The command
-  line needs a Home Assistant token" in `docs/getting-started.md`). Exploring did not
-  need it.
+A Home Assistant token is needed only for the command-line fallback (the `develop`
+skill's last section) and for the `nodered-migration` scripts.
 
 Say what happened so far: the house was read, nothing was changed, so there is nothing
 to undo.
