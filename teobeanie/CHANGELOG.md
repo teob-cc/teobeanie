@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased — move to another install
 
 - **Move to another install.** Home Assistant restores an add-on's backup only into the
   same slug; now a house can move from one Teobeanie install to another (the local
@@ -12,6 +12,12 @@
   its journal is empty: all or nothing, journaled, and never twice. A person exports
   through the panel; no MCP tool does. See
   [docs/moving.md](https://github.com/teob-cc/teobeanie/blob/main/docs/moving.md).
+- **Connect: Mint a token** is always clickable; an empty name gets a hint, Enter mints,
+  and a disabled button looks disabled. Before, it looked enabled while it waited for a
+  name, so a click did nothing.
+- **Releases reach the store only with their images.** The store reads the version from
+  `main`; `main` now moves to a release only after both images are pushed and pull
+  without a login, so an update is never offered before it can be installed.
 
 ## 0.4.0 — develop and operate behaviours over MCP
 
