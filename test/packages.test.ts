@@ -279,12 +279,14 @@ describe("installing the starter set", () => {
 });
 
 describe("one version", () => {
-  it("package.json, the add-on's config.yaml and the SDK packages are checked against agree", () => {
+  it("package.json, the add-on's config.yaml, the plugin and the SDK packages are checked against agree", () => {
     const root = join(import.meta.dirname, "..");
     const pkg = (json(join(root, "package.json")) as { version: string }).version;
     const addon = /^version:\s*"([^"]+)"/m.exec(readFileSync(join(root, "teobeanie", "config.yaml"), "utf8"))?.[1];
     expect(SDK_VERSION).toBe(pkg);
     expect(addon).toBe(pkg);
+    // The Claude Code plugin with the skills is released with the add-on.
+    expect((json(join(root, ".claude-plugin", "plugin.json")) as { version: string }).version).toBe(pkg);
     // The changelog's newest entry is this version.
     expect(/^## (\d+\.\d+\.\d+)/m.exec(readFileSync(join(root, "teobeanie", "CHANGELOG.md"), "utf8"))?.[1]).toBe(pkg);
   });

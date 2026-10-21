@@ -10,27 +10,32 @@ as a heuristic instance (a pattern with parameters), prove it would have done th
 or better on the house's own history, and only then move control over: one flow at a
 time, reversibly, watched.
 
-Background: `docs/heuristics.md` (patterns, rules, modes, replay, "Porting from
-Node-RED"). Scripts in `scripts/` next to this file; run them with
-`HA_URL=http://<ha>:8123 HA_TOKEN=<admin long-lived token>`.
+Background: `${CLAUDE_PLUGIN_ROOT}/docs/heuristics.md` (patterns, rules, modes, replay,
+"Porting from Node-RED"). The working copy, the sync script and the Teobeanie clone
+(`WC`, `SYNC`, `TB`) are set up as in the `develop` skill; going active follows the
+`operate` skill. The two scripts of this skill are in
+`${CLAUDE_PLUGIN_ROOT}/skills/nodered-migration/scripts/` (below: `NR`). They read
+`HA_URL` and `HA_TOKEN`; pass the token from its file inside the command,
+`HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)"`, never print it.
 
 ## Ground rules
 
 - **Privacy.** Entity ids, people's names, chat ids, routines, Node-RED node ids and the
-  inventory belong in the private house config repo (next to `heuristics.json`), never
-  in this repository. Tests and examples use made-up names.
+  inventory belong in the private working copy (next to `heuristics.json`), never in
+  the public Teobeanie repository. Tests and examples there use made-up names.
 - **Ask before touching Node-RED.** Name the exact node ids to disable and what they do;
   wait for a yes per batch. Never delete nodes during a migration — disable.
-- **Deploy order:** code first, then the config that depends on it (an out-of-scope
-  instance is refused at start).
+- **One push per step:** the scope, a house package and the instance that needs them
+  go to the box together. The reload checks them as one, all or nothing, and an
+  instance outside the scope is refused.
 - **Keep everything reversible:** every flow has a written rollback (instance back to
   shadow + the node ids to re-enable).
 
 ## 1. Inventory: what still acts
 
 ```sh
-node scripts/nodered.mjs effects          # every acting node: LIVE / dead / off, with its triggers
-node scripts/nodered.mjs trace <node id>  # where its input comes from, everything it feeds
+node $NR/nodered.mjs effects          # every acting node: LIVE / dead / off, with its triggers
+node $NR/nodered.mjs trace <node id>  # where its input comes from, everything it feeds
 ```
 
 For each LIVE effect write one row in the private inventory: flow → intended behaviour →
@@ -68,7 +73,8 @@ from `last_changed` (`heldSince`), not from boot.
 ## 3. Scope and shadow
 
 Add the instance to `heuristics.json` with `"mode": "shadow"`; add its entities to
-`allowlist.json` (`"operate": true` only for what it actuates). Deploy. The add-on
+`allowlist.json` (`"operate": true` only for what it actuates). Push it (`$SYNC push
+$WC`, after specs and a commit, as in the `develop` skill). The add-on
 option `shadow_mode` (default true) forces every instance to shadow regardless of the
 file — it must be off before any instance can go active.
 
@@ -78,7 +84,8 @@ parameters with `simulate()` first (made-up entity names).
 ## 4. Prove parity on history
 
 ```sh
-node dist/studio/cli.js replay <config folder> <heuristic>/<id> --replaces Supervisor --days 7
+cd $TB && HA_URL=... HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)" \
+  node dist/studio/cli.js replay $WC <heuristic>/<id> --replaces Supervisor --days 7
 ```
 
 - Node-RED calls HA as the system user **Supervisor**. `--replaces Supervisor` drops its
@@ -94,11 +101,13 @@ node dist/studio/cli.js replay <config folder> <heuristic>/<id> --replaces Super
 
 1. Get the user's OK for the exact node ids.
 2. Disable the **effect** nodes (the call-service / sender), not shared triggers:
-   `node scripts/nodered.mjs disable <id>...` (backs the flows up, deploys only those
+   `node $NR/nodered.mjs disable <id>...` (backs the flows up, deploys only those
    nodes, reads them back). Same seconds:
-3. Set the instance `"mode": "active"` in the private `heuristics.json`, deploy config.
+3. Set the instance `"mode": "active"` in the working copy's `heuristics.json`, commit,
+   `$SYNC push $WC` (the `operate` skill: one mode per push, the `shadow_mode` option
+   off).
 4. Start a watcher and keep it running for at least a day:
-   `node scripts/cutover-watch.mjs <heuristic>/<id> <entities...> >> cutover.log`
+   `node $NR/cutover-watch.mjs <heuristic>/<id> <entities...> >> cutover.log`
    It prints Teobeanie's decisions and calls, state changes with who made them (Teobeanie, a
    person, a device, a system user) and **ALERT** lines for: a system user (Node-RED,
    another add-on) calling an owned entity, refused or failed actions. The add-on's
@@ -106,7 +115,7 @@ node dist/studio/cli.js replay <config folder> <heuristic>/<id> --replaces Super
    chat by itself; the watcher adds the per-event detail.
 5. Record the time, node ids and rollback in the private inventory.
 
-Rollback: instance back to `"shadow"` + deploy, `nodered.mjs enable <ids>`.
+Rollback: instance back to `"shadow"` + push, `node $NR/nodered.mjs enable <ids>`.
 
 ## 6. Watch the first real uses
 
@@ -122,9 +131,10 @@ first use to the user (time, what happened, ok). Typical findings and their fixe
   switched on in an already empty room, must still get the full run-on and be switched
   off later; add a test for each case found live, then fix.
 - **No-op calls.** Don't send `turn_off` to something already off.
-- **Restarts.** A code deploy restarts the add-on (~30 s). Timers persist; anything due
-  during the gap fires at start. Deploy outside scheduled moments (not at 07:00 when
-  something switches on at 07:00).
+- **Restarts.** An add-on update or restart takes it away for about 30 s (a config push
+  does not restart it). Timers persist; anything due during the gap fires at start.
+  Update outside scheduled moments (not at 07:00 when something switches on at
+  07:00).
 - **Devices with their own schedules** (cloud air conditioners) fight an enforced
   setpoint; find and remove the device-side schedule rather than out-writing it.
 

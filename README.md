@@ -9,7 +9,23 @@ decision, built with your own AI agent over MCP.**
 > automations: they decide and journal what they *would* do, and the panel shows how
 > often your current system did the same.
 
-Getting started with your agent: [docs/getting-started.md](docs/getting-started.md)
+## Start with your agent
+
+For Home Assistant OS and Claude Code:
+
+1. Add the repository with the badge above, install **Teobeanie**, start it. It starts in shadow.
+2. Make a long-lived token (your profile → Security) and save it to `~/.config/teobeanie/ha-token`.
+3. Connect your agent: download [`scripts/teobeanie-mcp-bridge.mjs`](scripts/teobeanie-mcp-bridge.mjs) to `~/.config/teobeanie/mcp-bridge.mjs`, then `claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 -e HA_TOKEN_FILE=~/.config/teobeanie/ha-token -- node ~/.config/teobeanie/mcp-bridge.mjs`.
+4. Add the skills: `/plugin marketplace add teob-cc/teobeanie`, then `/plugin install teobeanie@teobeanie`.
+5. Paste the prompt from [docs/getting-started.md](docs/getting-started.md): the agent explores your house read-only, suggests three first behaviours, and sets the ones you pick up in shadow.
+
+The whole walk-through, with what happens next and troubleshooting, is
+[docs/getting-started.md](docs/getting-started.md).
+
+**Skills** ([skills/](skills)): `onboard` (explore the house, suggest starter packages),
+`develop` (a behaviour in shadow: scope, instance, specs, replay, push), `operate` (go
+active with the owner's yes, undo, the pause, refused actions), `explain` (why something
+happened, from the journal), `nodered-migration` (move Node-RED flows over, one at a time).
 
 ## What it is
 
@@ -103,9 +119,9 @@ version, so the new image is built while the old one still runs;
 
 ### Releasing
 
-1. Bump the version in `package.json`, `teobeanie/config.yaml` and `SDK_VERSION` in
-   `src/packages/manifest.ts` (a test keeps them equal), and add a
-   `teobeanie/CHANGELOG.md` entry.
+1. Bump the version in `package.json`, `teobeanie/config.yaml`, `SDK_VERSION` in
+   `src/packages/manifest.ts` and `.claude-plugin/plugin.json` (a test keeps them
+   equal), and add a `teobeanie/CHANGELOG.md` entry.
 2. Commit, then tag `v<version>` and push the tag.
 3. CI tests, lints and builds the `amd64` and `aarch64` images, and pushes
    `ghcr.io/teob-cc/{arch}-teobeanie:<version>` on the tag. `config.yaml`'s `image:`

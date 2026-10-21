@@ -536,6 +536,7 @@ panel/src/           views/ (House, Decisions, Heuristics, Studio, Today=Calls),
 teobeanie/          add-on packaging: config.yaml, Dockerfile, DOCS.md, translations
 packages/            the starter packages (one folder each: teobeanie.json, code, specs, README, example.json)
 examples/            starter working set, custom heuristic example
-scripts/             deploy-local-addon.sh, teobeanie-mcp-bridge.mjs
-docs/                heuristics.md, house.md, deploy.md, this file
+scripts/             deploy-local-addon.sh, teobeanie-mcp-bridge.mjs, config-sync.sh (pull and push a config folder over SSH)
+skills/              the agent skills (onboard, develop, operate, explain, nodered-migration); .claude-plugin/ makes the repository a Claude Code plugin marketplace
+docs/                getting-started.md, heuristics.md, house.md, deploy.md, this file
 ```

@@ -26,6 +26,12 @@ The add-on installs from prebuilt images for `amd64` and `aarch64`.
 
 ## Getting started
 
+**With your agent:** five steps and one prompt, in
+[docs/getting-started.md](https://github.com/teob-cc/teobeanie/blob/main/docs/getting-started.md).
+The agent explores your house read-only, suggests first behaviours from the starter
+packages, sets the ones you pick up in shadow, and makes nothing active until you say
+yes. By hand:
+
 1. Start the add-on and open **Teobeanie** in the sidebar. If it isn't there, turn on
    **Show in sidebar** on the add-on's Info tab (or use **Open web UI**).
 2. In this add-on's config folder (`addon_configs/…_teobeanie` in the Samba or

@@ -1,0 +1,17 @@
+{
+  "name": "teobeanie",
+  "description": "Skills for Teobeanie, the Home Assistant add-on that runs behaviours as tested pure functions with a journal of every decision.",
+  "owner": {
+    "name": "Tim Evdokimov",
+    "url": "https://github.com/teob-cc"
+  },
+  "plugins": [
+    {
+      "name": "teobeanie",
+      "source": "./",
+      "description": "Onboard a house, develop behaviours in shadow, take them active with consent, and explain why something happened, over Teobeanie's read-only MCP tools.",
+      "category": "home-automation",
+      "tags": ["home-assistant", "home-automation", "mcp"]
+    }
+  ]
+}
