@@ -2,3 +2,4 @@
 #   path/in/repo  # reason          the file is exempt from every rule but the deny list
 #   object:<id>  # reason           an extra generic placeholder object id (never a real house's name)
 test/privacy.test.ts  # synthetic chat ids, tokens, addresses and entity ids that exercise the scan itself
+object:relays  # the placeholder package_export writes for a package's "relays" role (<domain>.<role>), checked in test/develop-tools.test.ts

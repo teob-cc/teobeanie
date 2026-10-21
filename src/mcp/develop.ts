@@ -164,7 +164,7 @@ function applied(o: ReloadOutcome, extra: Record<string, unknown> = {}): Record<
   return { ...extra, revision: o.journaled.revision, ...(o.journaled.parent !== undefined ? { parent: o.journaled.parent } : {}), summary: o.journaled.summary, undo: o.journaled.parent !== undefined ? `rollback with n: ${o.journaled.parent}` : undefined };
 }
 
-/** The params of an example instance with every role's entities replaced by a placeholder ("light.lights"). */
+/** The params of an example instance with every role's entities replaced by a placeholder ("<domain>.<role>"). */
 function placeholderParams(params: unknown, roles: Record<string, { domain: string | string[]; many?: boolean }>): { params: unknown; ids: string[] } {
   const out = JSON.parse(JSON.stringify(params ?? {})) as unknown;
   const ids: string[] = [];
@@ -213,7 +213,7 @@ export function scaffoldFiles(name: string, pattern: string, kind: "decider" | "
     pattern: pattern as Manifest["pattern"],
     heuristics: { [name]: { title, pattern: pattern as Manifest["pattern"], roles, ...(notice ? { uses: ["notify"] } : {}) } },
   };
-  const params = notice ? { sensor: "binary_sensor.example_sensor" } : { sensor: "binary_sensor.example_sensor", target: "light.example_light", offAfterMin: 5 };
+  const params = notice ? { sensor: "binary_sensor.hallway_motion" } : { sensor: "binary_sensor.hallway_motion", target: "light.hallway", offAfterMin: 5 };
   const example = { heuristic: name, id: "example", mode: "shadow", params };
   const code =
     kind === "rule" && !notice
@@ -336,12 +336,12 @@ import { describe, expect, it, simulate } from "teobeanie/test";
 import { ${camel} } from "./${name}.ts";
 
 describe("${name}", () => {
-  const params = { sensor: "binary_sensor.example_sensor" };
+  const params = { sensor: "binary_sensor.hallway_motion" };
 
   it("tells people once when the sensor turns on", () => {
-    const sim = simulate(${camel}, params, { "binary_sensor.example_sensor": "off" });
-    sim.set("binary_sensor.example_sensor", "on");
-    expect(sim.calls()).toEqual(["notify: binary_sensor.example_sensor turned on"]);
+    const sim = simulate(${camel}, params, { "binary_sensor.hallway_motion": "off" });
+    sim.set("binary_sensor.hallway_motion", "on");
+    expect(sim.calls()).toEqual(["notify: binary_sensor.hallway_motion turned on"]);
   });
 });
 `
@@ -352,20 +352,20 @@ import { minutes } from "teobeanie";
 import { ${camel} } from "./${name}.ts";
 
 describe("${name}", () => {
-  const params = { sensor: "binary_sensor.example_sensor", target: "light.example_light", offAfterMin: 5 };
-  const world = { "binary_sensor.example_sensor": "off", "light.example_light": "off" };
+  const params = { sensor: "binary_sensor.hallway_motion", target: "light.hallway", offAfterMin: 5 };
+  const world = { "binary_sensor.hallway_motion": "off", "light.hallway": "off" };
 
   it("switches the target on when the sensor turns on", () => {
     const sim = simulate(${camel}, params, world);
-    sim.set("binary_sensor.example_sensor", "on");
-    expect(sim.calls()).toEqual(["light.turn_on light.example_light"]);
+    sim.set("binary_sensor.hallway_motion", "on");
+    expect(sim.calls()).toEqual(["light.turn_on light.hallway"]);
   });
 
   it("switches it off once the sensor has been off a while", () => {
     const sim = simulate(${camel}, params, world);
-    sim.set("binary_sensor.example_sensor", "on").set("light.example_light", "on");
-    sim.set("binary_sensor.example_sensor", "off").advance(minutes(5));
-    expect(sim.calls()).toEqual(["light.turn_on light.example_light", "light.turn_off light.example_light"]);
+    sim.set("binary_sensor.hallway_motion", "on").set("light.hallway", "on");
+    sim.set("binary_sensor.hallway_motion", "off").advance(minutes(5));
+    expect(sim.calls()).toEqual(["light.turn_on light.hallway", "light.turn_off light.hallway"]);
   });
 });
 `;

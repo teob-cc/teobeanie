@@ -32,27 +32,27 @@ const T = Date.UTC(2026, 9, 21, 12, 0, 0);
 const ALLOWLIST = `{
   "policyVersion": 1,
   "entities": [
-    { "id": "switch.r1", "operate": true },
-    { "id": "switch.r2" },
-    { "id": "binary_sensor.door" },
-    { "id": "binary_sensor.dusk" },
+    { "id": "switch.gate_relay", "operate": true },
+    { "id": "switch.coffee_machine" },
+    { "id": "binary_sensor.front_door" },
+    { "id": "binary_sensor.dark" },
     { "id": "light.porch", "operate": true }
   ]
 }
 `;
-const GATE = { heuristic: "relay-pulse", id: "gate", mode: "shadow", params: { relays: ["switch.r1"], pressMs: 1000, recheckMs: 5000 } };
+const GATE = { heuristic: "relay-pulse", id: "gate", mode: "shadow", params: { relays: ["switch.gate_relay"], pressMs: 1000, recheckMs: 5000 } };
 const PORCH = { heuristic: "lamp", id: "porch", mode: "shadow", params: {} };
 
 /** A house file: a fact and a decider that reads it (a light on when the door opens in the dark). */
 const LAMP = `import { call, defineHeuristic, fact } from "teobeanie";
 
-export const darkOut = fact("dark-out", ({ ha }) => ha.binary_sensor.dusk.is("on"));
+export const darkOut = fact("dark-out", ({ ha }) => ha.binary_sensor.dark.is("on"));
 
 export const lamp = defineHeuristic({
   id: "lamp",
   title: "Porch lamp",
   description: "",
-  watch: () => ["binary_sensor.door"],
+  watch: () => ["binary_sensor.front_door"],
   actuates: () => ["light.porch"],
   facts: () => ["dark-out"],
   initial: () => ({}),
@@ -170,7 +170,7 @@ async function house(opts: { send?: (m: Record<string, unknown>) => unknown; sta
   const read = (p: string): string => readFileSync(join(config, p), "utf8");
   const shadowDecision = async (): Promise<void> => {
     await host.start({ subscribeTrigger: async () => async () => {} });
-    host.onSignal(sig(1, "switch.r1"));
+    host.onSignal(sig(1, "switch.gate_relay"));
     await vi.waitFor(() => expect(journal.queryEvents({ category: "relay-pulse", entityId: "gate", order: "asc", limit: 100 }).some((r) => r.manifest === "Decided")).toBe(true));
   };
   return { config, tools, call, revisions, changes, folder, read, host, journal, pause, commands, store, shadowDecision };
@@ -181,10 +181,10 @@ describe("develop tools: one revision each, by mcp:<caller>", () => {
     const h = await house();
     const writes: Array<[string, Record<string, unknown>]> = [
       ["file_write", { path: "packages/relay-pulse/README.md", content: "# Momentary relay\n\nChanged.\n" }],
-      ["scope_add", { entity: "binary_sensor.window" }],
-      ["scope_operate", { entity: "switch.r2", reason: "relay-pulse/side releases it" }],
-      ["instance_upsert", { heuristic: "relay-pulse", id: "side", params: { relays: ["switch.r2"], pressMs: 500, recheckMs: 5000 }, mode: "off" }],
-      ["instance_upsert", { heuristic: "relay-pulse", id: "side", params: { relays: ["switch.r2"], pressMs: 700, recheckMs: 5000 }, mode: "shadow" }],
+      ["scope_add", { entity: "binary_sensor.shed_door" }],
+      ["scope_operate", { entity: "switch.coffee_machine", reason: "relay-pulse/side releases it" }],
+      ["instance_upsert", { heuristic: "relay-pulse", id: "side", params: { relays: ["switch.coffee_machine"], pressMs: 500, recheckMs: 5000 }, mode: "off" }],
+      ["instance_upsert", { heuristic: "relay-pulse", id: "side", params: { relays: ["switch.coffee_machine"], pressMs: 700, recheckMs: 5000 }, mode: "shadow" }],
       ["package_install", { name: "hold" }],
       ["package_scaffold", { name: "porch-notice", pattern: "notice" }],
       ["package_scaffold", { name: "porch-light", pattern: "trigger", kind: "rule" }],
@@ -198,7 +198,7 @@ describe("develop tools: one revision each, by mcp:<caller>", () => {
       expect(r.out["revision"], name).toBe(h.store.last()!.revision);
       expect(h.changes().at(-1)!.by, name).toBe("mcp:agent:tester");
     }
-    expect(h.read("allowlist.json")).toContain('{ "id": "binary_sensor.window" }');
+    expect(h.read("allowlist.json")).toContain('{ "id": "binary_sensor.shed_door" }');
     expect(h.read("heuristics.json")).toContain('"pressMs": 700');
     expect(JSON.parse(h.read("teobeanie.lock.json")).packages.hold.origin).toBe("starter");
     // The skeletons load (the reload took them) and their specs pass.
@@ -219,8 +219,8 @@ describe("develop tools: one revision each, by mcp:<caller>", () => {
     const broken = await h.call("file_write", { path: "packages/relay-pulse/relay-pulse.ts", content: "export default 42;\n" });
     expect(broken.ok).toBe(false);
     expect(broken.error).toMatch(/the reload rejected the change, and the config folder is as it was/);
-    const scaffold = await h.call("instance_upsert", { heuristic: "relay-pulse", id: "x", params: { relays: ["switch.r2"], pressMs: 1000, recheckMs: 5000 } });
-    expect(scaffold.error).toMatch(/rejected/); // switch.r2 is observed only: the host refuses to let it own it
+    const scaffold = await h.call("instance_upsert", { heuristic: "relay-pulse", id: "x", params: { relays: ["switch.coffee_machine"], pressMs: 1000, recheckMs: 5000 } });
+    expect(scaffold.error).toMatch(/rejected/); // switch.coffee_machine is observed only: the host refuses to let it own it
     expect((await h.call("instance_upsert", { heuristic: "nope", id: "x", params: {} })).error).toMatch(/no heuristic nope/);
     expect((await h.call("file_write", { path: "heuristics.json", content: "{ not json" })).error).toMatch(/not JSON/);
     expect(h.folder()).toEqual(before);
@@ -241,7 +241,7 @@ describe("develop tools: one revision each, by mcp:<caller>", () => {
   it("never widens operate or goes active by the back door", async () => {
     const h = await house();
     expect((await h.call("scope_add", { entity: "light.hall", operate: true })).error).toMatch(/scope_operate/);
-    expect((await h.call("file_write", { path: "allowlist.json", content: ALLOWLIST.replace('{ "id": "switch.r2" }', '{ "id": "switch.r2", "operate": true }') })).error).toMatch(/only scope_operate/);
+    expect((await h.call("file_write", { path: "allowlist.json", content: ALLOWLIST.replace('{ "id": "switch.coffee_machine" }', '{ "id": "switch.coffee_machine", "operate": true }') })).error).toMatch(/only scope_operate/);
     const active = h.read("heuristics.json").replace('"mode": "shadow"', '"mode": "active"');
     expect((await h.call("file_write", { path: "heuristics.json", content: active })).error).toMatch(/only instance_mode/);
     expect((await h.call("instance_upsert", { ...GATE, mode: "active" })).error).toMatch(/never makes an instance active/);
@@ -287,18 +287,18 @@ describe("operate tools", () => {
 
   it("scope_operate needs a reason and journals it", async () => {
     const h = await house();
-    expect((await h.call("scope_operate", { entity: "switch.r2" })).error).toMatch(/reason is required/);
-    expect((await h.call("scope_operate", { entity: "switch.r9", reason: "x" })).error).toMatch(/not in the house scope/);
-    const ok = await h.call("scope_operate", { entity: "switch.r2", reason: "relay-pulse/side releases it" });
+    expect((await h.call("scope_operate", { entity: "switch.coffee_machine" })).error).toMatch(/reason is required/);
+    expect((await h.call("scope_operate", { entity: "switch.pump", reason: "x" })).error).toMatch(/not in the house scope/);
+    const ok = await h.call("scope_operate", { entity: "switch.coffee_machine", reason: "relay-pulse/side releases it" });
     expect(ok.out["revision"]).toBe(h.store.last()!.revision);
-    expect(h.read("allowlist.json")).toContain('{ "id": "switch.r2", "operate": true }');
-    expect(h.changes().at(-1)!.summary).toBe("scope: switch.r2 may be operated (relay-pulse/side releases it)");
+    expect(h.read("allowlist.json")).toContain('{ "id": "switch.coffee_machine", "operate": true }');
+    expect(h.changes().at(-1)!.summary).toBe("scope: switch.coffee_machine may be operated (relay-pulse/side releases it)");
   });
 
   it("adds a twin, compares, promotes it and rolls the promote back, each a revision", async () => {
     const h = await house();
     const original = h.read("heuristics.json");
-    const twin = await h.call("instance_upsert", { heuristic: "relay-pulse", id: "gate-next", params: { relays: ["switch.r1"], pressMs: 400, recheckMs: 5000 }, twinOf: "relay-pulse/gate" });
+    const twin = await h.call("instance_upsert", { heuristic: "relay-pulse", id: "gate-next", params: { relays: ["switch.gate_relay"], pressMs: 400, recheckMs: 5000 }, twinOf: "relay-pulse/gate" });
     expect(twin.error).toBeUndefined();
     expect(h.host.instances().find((i) => i.key === "relay-pulse/gate-next")!.twinOf).toBe("relay-pulse/gate");
     const compared = await h.call("twin_compare", { key: "relay-pulse/gate" });
@@ -341,8 +341,8 @@ describe("replay and export", () => {
         asked.push(m);
         if (m["type"] === "history/history_during_period") {
           return {
-            "binary_sensor.dusk": [{ s: "off", lu: s(from) }, { s: "on", lu: s(from + 2 * 3600_000) }],
-            "binary_sensor.door": [{ s: "off", lu: s(from) }, { s: "on", lu: s(from + 3600_000) }, { s: "off", lu: s(from + 3600_000 + 60_000) }, { s: "on", lu: s(from + 3 * 3600_000) }],
+            "binary_sensor.dark": [{ s: "off", lu: s(from) }, { s: "on", lu: s(from + 2 * 3600_000) }],
+            "binary_sensor.front_door": [{ s: "off", lu: s(from) }, { s: "on", lu: s(from + 3600_000) }, { s: "off", lu: s(from + 3600_000 + 60_000) }, { s: "on", lu: s(from + 3 * 3600_000) }],
             "light.porch": [{ s: "off", lu: s(from) }],
           };
         }
@@ -351,7 +351,7 @@ describe("replay and export", () => {
     });
     const r = await h.call("replay", { instance: "lamp/porch", days: 1 });
     expect(r.error).toBeUndefined();
-    expect((asked[0]!["entity_ids"] as string[]).sort()).toEqual(["binary_sensor.door", "binary_sensor.dusk", "light.porch"]);
+    expect((asked[0]!["entity_ids"] as string[]).sort()).toEqual(["binary_sensor.dark", "binary_sensor.front_door", "light.porch"]);
     expect(r.out).toMatchObject({ facts: ["dark-out"], would_call: 1, parity: [{ entity: "light.porch", teobeanie_calls: 1, house_changes: 0, matched: 0, teobeanie_only: 1 }] });
     expect((r.out["calls"] as Array<{ why: string }>)[0]!.why).toBe("door opened in the dark");
     expect((await h.call("replay", { instance: "lamp/porch", days: 30 })).out["days"]).toBe(7);
@@ -361,7 +361,7 @@ describe("replay and export", () => {
     const env = process.env["PRIVACY_DENY"];
     process.env["PRIVACY_DENY"] = "a-word-no-file-has";
     try {
-      const h = await house({ states: ["light.den_lamp", "switch.r1"] });
+      const h = await house({ states: ["light.den_lamp", "switch.pump"] });
       const clean = await h.call("package_export", { name: "relay-pulse" });
       expect(clean.out["exportable"]).toBe(true);
       const example = JSON.parse((clean.out["files"] as Record<string, string>)["example.json"]!) as { id: string; params: { relays: string[] } };
@@ -411,7 +411,7 @@ describe("the MCP surface", () => {
       expect(by.get("instance_upsert")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
       for (const t of ["instance_mode", "scope_operate", "rollback", "promote", "pause", "resume", "command"]) expect(by.get(t), t).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     }
-    const res = await post(ingress, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "scope_add", arguments: { entity: "binary_sensor.window" } } });
+    const res = await post(ingress, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "scope_add", arguments: { entity: "binary_sensor.shed_door" } } });
     expect(res.status).toBe(200);
     expect(recorded.at(-1)).toMatchObject({ tool: "scope_add", ok: true, revision: h.store.last()!.revision });
     expect(existsSync(join(h.config, "allowlist.json"))).toBe(true);
