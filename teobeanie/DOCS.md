@@ -80,6 +80,13 @@ signal that started it), `signals` (an entity's recorded rows over a range), `ti
 in time order), `tool_calls` and `whoami`. Only the house scope
 (`allowlist.json`) exists for them, and every call is journaled with its caller.
 
+Five more explore all of Home Assistant, outside the house scope too: `ha_registry`
+(areas, devices, entities), `ha_states` (current states), `ha_history` (the recorder,
+at most 7 days per call), `ha_services` (services and their fields) and `suggest` (the
+behaviour packages whose roles your entities fill, pre-bound). They only read, and
+nothing they read is recorded; the calls are journaled like the others. With them an
+agent needs no Home Assistant MCP server of its own.
+
 The only way in is Home Assistant ingress, so Home Assistant authenticates every
 request, and the client must connect from one of the `mcp_networks`: by default the
 private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, fe80::/10) and
