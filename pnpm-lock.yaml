@@ -20,6 +20,9 @@ importers:
       hono:
         specifier: ^4.9.0
         version: 4.12.30
+      sucrase:
+        specifier: ^3.35.1
+        version: 3.35.1
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
