@@ -22,7 +22,7 @@ DIR="/local_apps/$SLUG"   # the SSH add-on's view of /addons on current HA OS
 # Every commit is its own add-on version (0.2.0-<sha>), so the Supervisor sees an update:
 # an update builds the new image while the old container runs and only then swaps
 # them, where a rebuild stops the add-on first (docs/deploy.md).
-VERSION="$(sed -n 's/^version: "\(.*\)"$/\1/p' teobeanie/config.yaml)-$(git rev-parse --short "$REV^{commit}")"
+VERSION="$(git show "$REV:teobeanie/config.yaml" | sed -n 's/^version: "\(.*\)"$/\1/p')-$(git rev-parse --short "$REV^{commit}")"
 
 git archive "$REV" | ssh -o BatchMode=yes "root@$HA_HOST" "
   set -e
