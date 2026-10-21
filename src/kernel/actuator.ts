@@ -62,7 +62,12 @@ export interface SafeActuator {
   allowUse(instanceKey: string, entities: string[]): void;
   /** A service no heuristic may ever call on this entity (e.g. reopening a shut-off valve). */
   forbid(entity: string, service: string, reason: string): void;
-  vet(instanceKey: string, action: Action, now: number, notifyPerHour: number): Verdict;
+  /**
+   * `dry`: judge it without the rate windows, neither checked nor counted. A shadow twin
+   * vets as its original this way (host.ts): it never calls, so it spends none of the
+   * original's budget, and its verdicts do not hang on which of the two decided first.
+   */
+  vet(instanceKey: string, action: Action, now: number, notifyPerHour: number, dry?: boolean): Verdict;
   execute(action: Action, from?: string): Promise<ActionOutcome>;
   /**
    * An instance that protects the house (pattern "guard": the leak shutoff) acts through
@@ -107,7 +112,8 @@ export function createSafeActuator(deps: {
   const windows = new Map<string, number[]>();
   let paused = false;
 
-  const admit = (key: string, now: number, limit: number): boolean => {
+  const admit = (key: string, now: number, limit: number, dry = false): boolean => {
+    if (dry) return true;
     const recent = (windows.get(key) ?? []).filter((t) => t > now - 3_600_000);
     if (recent.length >= limit) {
       windows.set(key, recent);
@@ -133,10 +139,10 @@ export function createSafeActuator(deps: {
       for (const e of entities) users.set(e, new Set([...(users.get(e) ?? []), instanceKey]));
     },
 
-    vet(instanceKey, action, now, notifyPerHour) {
+    vet(instanceKey, action, now, notifyPerHour, dry = false) {
       if (paused && !exempt.has(instanceKey)) return { ok: false, reason: "all heuristics paused" };
       if (action.kind === "notify") {
-        if (!admit(`notify:${instanceKey}`, now, notifyPerHour)) {
+        if (!admit(`notify:${instanceKey}`, now, notifyPerHour, dry)) {
           return { ok: false, reason: `notification rate limit (${notifyPerHour}/h)` };
         }
         return { ok: true };
@@ -165,7 +171,7 @@ export function createSafeActuator(deps: {
         }
       }
       for (const e of action.entities) {
-        if (!admit(`call:${e}`, now, perEntityPerHour)) {
+        if (!admit(`call:${e}`, now, perEntityPerHour, dry)) {
           return { ok: false, reason: `rate limit: ${e} already actuated ${perEntityPerHour}× in the last hour` };
         }
       }

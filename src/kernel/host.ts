@@ -33,6 +33,12 @@ export interface InstanceConfig {
   notifyPerHour?: number;
   /** The bot's command menu: descriptions by command name, instead of the heuristic's. */
   commandHelp?: Record<string, string>;
+  /**
+   * A shadow twin of another instance ("door-nag/back"): it watches, reads and decides on
+   * the same inputs, and may "claim" the same entities, because it never acts while its
+   * original does. The panel compares their decisions; promote swaps them.
+   */
+  twinOf?: string;
 }
 
 /** An entry of the bot's command menu. */
@@ -69,6 +75,8 @@ export interface InstanceInfo {
   alerts: boolean;
   /** The cap in force: the instance's own, else the heuristic's, else the kernel's. */
   notifyPerHour: number;
+  /** The instance this one is a twin of. */
+  twinOf?: string;
 }
 
 interface Instance {
@@ -90,6 +98,12 @@ interface Instance {
   notifyPerHour?: number;
   /** Everything the instance was built from except its code: equal means unchanged. */
   fingerprint: string;
+  twinOf?: string;
+  /**
+   * Of a twin pair, the one that does not claim vets as the one that does (dry: no rate
+   * window counts it), so its verdicts are the ones the other would get.
+   */
+  vetAs?: string;
 }
 
 type Log = (level: "debug" | "info" | "warn" | "error", msg: string) => void;
@@ -270,7 +284,32 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
       def.triggers?.(c.params) ?? {}, def.usesOutdoor ? (cfg.house?.outdoor ?? null) : null,
     ]);
     const commandHelp = { ...def.commandHelp?.(c.params), ...c.commandHelp };
-    candidates.push({ key, def, id: c.id, params: c.params, configuredMode, mode, watch, entities, actuates, uses, commands, commandHelp, alerts: c.alerts === true, ...(c.notifyPerHour !== undefined ? { notifyPerHour: c.notifyPerHour } : {}), fingerprint });
+    candidates.push({ key, def, id: c.id, params: c.params, configuredMode, mode, watch, entities, actuates, uses, commands, commandHelp, alerts: c.alerts === true, ...(c.notifyPerHour !== undefined ? { notifyPerHour: c.notifyPerHour } : {}), ...(c.twinOf !== undefined ? { twinOf: c.twinOf } : {}), fingerprint });
+  }
+
+  // Twins. Of a pair, one claims: the original, unless the twin is active (the original
+  // then is not) or the original is off. The other claims nothing and vets as it.
+  const twins = new Map<string, Instance>();
+  for (const twin of [...candidates]) {
+    if (twin.twinOf === undefined) continue;
+    const original = candidates.find((x) => x.key === twin.twinOf);
+    const problem =
+      original === undefined ? `${twin.key}: twinOf "${twin.twinOf}": no such instance`
+      : original.twinOf !== undefined ? `${twin.key}: twinOf ${original.key}, which is itself a twin`
+      : twins.has(original.key) ? `${twin.key}: ${original.key} already has a twin (${twins.get(original.key)!.key})`
+      : twin.configuredMode === "active" && original.configuredMode === "active" ? `${twin.key}: a twin cannot be active while its original ${original.key} is`
+      : undefined;
+    if (problem !== undefined) {
+      problems.push(problem);
+      candidates.splice(candidates.indexOf(twin), 1);
+      continue;
+    }
+    twins.set(original!.key, twin);
+    const [claimer, other] = twin.mode === "active" || original!.mode === "off" ? [twin, original!] : [original!, twin];
+    if (other.mode !== "off") {
+      other.vetAs = claimer.key;
+      other.fingerprint += JSON.stringify({ vetAs: claimer.key });
+    }
   }
 
   // Owners first, then the instances that use what an owner shares (a press on a
@@ -279,7 +318,7 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
   const shared = new Set<string>();
   const forbids: Plan["forbids"] = [];
   for (const inst of candidates) {
-    if (inst.mode === "off") continue;
+    if (inst.mode === "off" || inst.vetAs !== undefined) continue;
     for (const e of inst.actuates) {
       const prev = owners.get(e);
       if (prev !== undefined && prev !== inst.key) throw new Error(`entity ${e} is claimed by both ${prev} and ${inst.key} — one owner per entity`);
@@ -298,9 +337,15 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
       problems.push(`${inst.key} uses ${unshared.join(", ")}, which no running instance shares`);
       continue;
     }
+    // A twin that switches what a third instance owns would fight it once promoted.
+    const foreign = inst.vetAs === undefined ? [] : inst.actuates.filter((e) => owners.has(e) && owners.get(e) !== inst.vetAs);
+    if (foreign.length > 0) {
+      problems.push(`${inst.key} actuates ${foreign.map((e) => `${e} (owned by ${owners.get(e)})`).join(", ")}, which its twin does not own`);
+      continue;
+    }
     plan.instances.push(inst);
     if (inst.mode === "off") continue;
-    plan.claims.push([inst.key, inst.actuates]);
+    if (inst.vetAs === undefined) plan.claims.push([inst.key, inst.actuates]);
     if (inst.uses.length > 0) plan.uses.push([inst.key, inst.uses]);
     for (const e of inst.watch) plan.watchers.set(e, [...(plan.watchers.get(e) ?? []), inst.key]);
     for (const c of inst.commands) plan.commandees.set(c, [...(plan.commandees.get(c) ?? []), inst.key]);
@@ -388,10 +433,13 @@ export function createHeuristicHost(
   const boot = (r: Running): void => {
     if (journal === undefined || r.runtime !== undefined || r.inst.mode === "off") return;
     const inst = r.inst;
+    const vetAs = inst.vetAs;
+    const actuator: SafeActuator =
+      vetAs === undefined ? opts.actuator : { ...opts.actuator, vet: (_key, action, now, cap) => opts.actuator.vet(vetAs, action, now, cap, true) };
     const c = compileHeuristic(inst.def, {
       instance: (id) => (id === inst.id ? inst : undefined),
       observe,
-      actuator: opts.actuator,
+      actuator,
       log: opts.log,
       house: liveHouse,
       onState: (s) => {
@@ -459,6 +507,7 @@ export function createHeuristicHost(
         params: i.params,
         alerts: i.alerts,
         notifyPerHour: i.notifyPerHour ?? i.def.notifyPerHour ?? DEFAULT_NOTIFY_PER_HOUR,
+        ...(i.twinOf !== undefined ? { twinOf: i.twinOf } : {}),
       })),
 
     attach(j, persisted) {

@@ -95,6 +95,8 @@ export function heuristicsJsonSchema(library: AnyHeuristic[]): JsonSchema {
             alerts: { type: "boolean", description: "Its notices also go to the alerts chat." },
             notifyPerHour: { type: "integer", minimum: 1, description: "Notifications per hour it may send, instead of the heuristic's own cap." },
             params: { type: "object" },
+            commandHelp: { type: "object", additionalProperties: { type: "string" }, description: "The bot's command menu: descriptions by command name." },
+            twinOf: { type: "string", description: "A shadow twin of this instance (heuristic/id): it decides on the same inputs and never acts while the original does." },
           },
           additionalProperties: false,
           allOf: library
