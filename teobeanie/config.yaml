@@ -13,6 +13,12 @@ hassio_api: true
 ingress: true
 panel_icon: mdi:home-lightning-bolt
 panel_title: Teobeanie
+# The agent port: /mcp only, for AI agents with a token minted on the panel's Connect
+# page. The owner can change the host port, or disable it, in the Network section.
+ports:
+  8199/tcp: 8199
+ports_description:
+  8199/tcp: MCP for AI agents (agent token required)
 map:
   - type: addon_config
     read_only: false

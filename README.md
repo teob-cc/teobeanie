@@ -23,13 +23,16 @@ loop.
 For Home Assistant OS and Claude Code:
 
 1. Add the repository with the badge above, install **Teobeanie**, start it. It starts in shadow.
-2. Make a long-lived token (your profile → Security) and save it to `~/.config/teobeanie/ha-token`.
-3. Connect your agent: download [`scripts/teobeanie-mcp-bridge.mjs`](scripts/teobeanie-mcp-bridge.mjs) to `~/.config/teobeanie/mcp-bridge.mjs`, then `claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 -e HA_TOKEN_FILE=~/.config/teobeanie/ha-token -- node ~/.config/teobeanie/mcp-bridge.mjs`.
+2. Open **Teobeanie** in the sidebar → **Connect**, name a token for your agent ("Claude Code on my laptop") and mint it.
+3. Paste the line the page shows into a terminal: `claude mcp add --transport http teobeanie http://homeassistant.local:8199/mcp --header "Authorization: Bearer <token>"`.
 4. Add the skills: `/plugin marketplace add teob-cc/teobeanie`, then `/plugin install teobeanie@teobeanie`.
 5. Paste the prompt from [docs/getting-started.md](docs/getting-started.md): the agent explores your house read-only, suggests three first behaviours, and sets the ones you pick up in shadow.
 
 The whole walk-through, with what happens next and troubleshooting, is
-[docs/getting-started.md](docs/getting-started.md).
+[docs/getting-started.md](docs/getting-started.md). An agent that speaks only stdio
+connects through Home Assistant ingress with
+[`scripts/teobeanie-mcp-bridge.mjs`](scripts/teobeanie-mcp-bridge.mjs) instead (the
+fallback there).
 
 **Skills** ([skills/](skills)): `onboard` (explore the house, suggest starter packages),
 `develop` (a behaviour in shadow: scope, instance, specs, replay, push), `operate` (go
@@ -53,7 +56,8 @@ happened, from the journal), `nodered-migration` (move Node-RED flows over, one 
   who changed what, decisions and their chains, and the behaviours' source. Others
   explore all of Home Assistant (registries, states, history, services) and suggest
   the packages that fit, without recording what they read: Home Assistant's own MCP
-  server is not needed.
+  server is not needed. Each agent connects with a token of its own, minted and
+  revoked in the panel, and every call is journaled with its name.
 
 Built on [teob-ts](https://github.com/teob-cc/teob-ts), an event-sourcing framework.
 

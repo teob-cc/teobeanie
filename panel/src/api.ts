@@ -211,6 +211,26 @@ export interface PickerEntity {
 /** An instance edit's answer: the reload's outcome, or the problems that refused it before anything was written. */
 export type EditOutcome = ReloadOutcome | { ok: false; error: string; problems: string[] };
 
+/** An agent token as the Connect page lists it (src/mcp/agents.ts AgentTokenInfo): never the secret. */
+export interface AgentToken {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** An origin (origin.ts): person:<name>, user:<id>, local. */
+  by: string;
+  /** Since the add-on started; null: not used yet. */
+  lastUsedAt: number | null;
+}
+
+/** GET api/connect (src/connect.ts ConnectInfo): the tokens and the agent port's host port. */
+export interface ConnectInfo {
+  /** null: the port is disabled in the add-on's Network section. */
+  port: number | null;
+  source: "supervisor" | "default" | "standalone";
+  defaultPort: number;
+  tokens: AgentToken[];
+}
+
 /** A write that answers with an outcome (200, or 422: rejected); anything else throws. */
 async function edit(url: string, method: string, body?: unknown): Promise<EditOutcome> {
   const res = await fetch(url, {
@@ -326,6 +346,23 @@ export const api = {
     return res.text();
   },
   studioTypes: () => getJson<{ toolkit: Record<string, string> | null; house: string; scope?: { observed: number; operated: number } }>("api/studio/types"),
+  /** The agent tokens and the agent port (ingress only). */
+  connect: () => getJson<ConnectInfo>("api/connect"),
+  /** A new agent token: the token itself is in this answer only. */
+  mintAgentToken: async (name: string): Promise<{ token: string; info: AgentToken }> => {
+    const res = await fetch("api/agent-tokens", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
+    const body = (await res.json().catch(() => ({}))) as { token?: string; info?: AgentToken; reason?: string; error?: string };
+    if (!res.ok || body.token === undefined || body.info === undefined) throw new Error(body.reason ?? body.error ?? `HTTP ${res.status}`);
+    return { token: body.token, info: body.info };
+  },
+  /** Revoke an agent token: refused from its next request on. */
+  revokeAgentToken: async (id: string): Promise<void> => {
+    const res = await fetch(`api/agent-tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
+      throw new Error(body.reason ?? body.error ?? `HTTP ${res.status}`);
+    }
+  },
   deviceEntities: (ids: string[]) =>
     getJson<{ devices: Record<string, string[]> }>(`api/device-entities?ids=${ids.map(encodeURIComponent).join(",")}`),
 };

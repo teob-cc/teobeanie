@@ -456,7 +456,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
 
     tool(
       "tool_calls",
-      "The MCP tool calls agents made against this house, newest first: tool, arguments, who called (HA user and network address), and the outcome. Use it to review what an agent has been doing.",
+      "The MCP tool calls agents made against this house, newest first: tool, arguments, who called (the agent token's name or the HA user, the network address and the door), and the outcome. Use it to review what an agent has been doing.",
       {
         since_min: { type: "number", description: "default 1440, max 30 days" },
         tool: { type: "string" },
@@ -494,7 +494,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
       },
     ),
 
-    tool("whoami", "Who this server thinks you are (HA user, network address, door) and the house's time.", {}, () => ({
+    tool("whoami", "Who this server thinks you are (the agent token's name or the HA user, network address, door) and the house's time.", {}, () => ({
       caller: deps.caller() ?? null,
       now: local(now()),
       time_zone: zone(),

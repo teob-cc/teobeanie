@@ -23,9 +23,10 @@ files. Behaviours run in shadow until the owner says otherwise.
 - **Ask before anything that changes the house.** That covers Home Assistant, the
   add-on's options and the add-on's config folder. Onboarding itself changes none of
   them. *Why:* the owner decides, and a change they did not expect is how trust is lost.
-- **The token is a secret.** It stays in `~/.config/teobeanie/ha-token`, for the bridge.
-  Never print it, echo it or paste it into the chat. *Why:* a long-lived admin token is
-  the whole house.
+- **Tokens are secrets.** The agent token lives in the MCP client's settings. A Home
+  Assistant token, when the owner has one, stays in `~/.config/teobeanie/ha-token`.
+  Never print either, echo it or paste it into the chat. *Why:* a long-lived admin
+  token is the whole house, and an agent token reads all of it.
 - **House data stays private.** Entity ids, names, areas and people go into this
   conversation and the owner's own files. They never go into the public Teobeanie
   repository, an issue, a gist or a pull request. *Why:* a house's ids say who lives
@@ -38,8 +39,10 @@ files. Behaviours run in shadow until the owner says otherwise.
 
 Call the `teobeanie` MCP server's tools (in Claude Code: `mcp__teobeanie__<tool>`).
 
-1. `whoami`: the Home Assistant user, the network address and the house's time zone. It
-   proves that the bridge, ingress and the add-on all work.
+1. `whoami`: who the add-on thinks is calling, the network address and the house's
+   time zone. Over the agent port the caller is `via: "agent"` with the token's name;
+   through the bridge it is `via: "ingress"` with the Home Assistant user. Either way
+   it proves the connection and the add-on work.
 2. `house_scope`: what Teobeanie observes and may operate. On a fresh install there is
    no `allowlist.json` yet, so the scope is the starter's placeholder ids
    (`light.hallway`, `binary_sensor.front_door`, …). That is expected. `develop` writes
@@ -52,10 +55,13 @@ When the tools are missing or fail:
 
 | Symptom | Fix |
 |---|---|
-| No `teobeanie` tools at all | The MCP server is not added. Step 3 of `docs/getting-started.md` |
-| The bridge says "no Teobeanie add-on is installed" or "several Teobeanie add-ons" | Add `-e ADDON=<slug>` to `claude mcp add` (the slug is in the add-on page's URL, such as `abcd1234_teobeanie`) |
+| No `teobeanie` tools at all | The MCP server is not added. Steps 2 and 3 of `docs/getting-started.md`: the panel's **Connect** page mints a token and shows the line to run |
+| `unauthorized: …` (401) | The agent token was revoked or mistyped. The owner mints a new one on the Connect page; run `claude mcp remove teobeanie`, then the new line |
+| Connection refused, or a timeout, on port 8199 | The address is not reachable from this machine, or the agent port is closed or moved (the add-on's Configuration tab → **Network**) |
+| `too many attempts` (429) | Too many wrong tokens from this address. Wait ten minutes |
+| The bridge (the fallback) says "no Teobeanie add-on is installed" or "several Teobeanie add-ons" | Add `-e ADDON=<slug>` to `claude mcp add` (the slug is in the add-on page's URL, such as `abcd1234_teobeanie`) |
 | `forbidden: client … is not in the allowed networks` | The client's address is outside the add-on's `mcp_networks` option. The owner adds their network there and restarts the add-on |
-| Home Assistant rejected the token | Make a new long-lived token (profile → Security) and save it to the file again |
+| The bridge says Home Assistant rejected the token | Make a new long-lived token (profile → Security) and save it to the file again |
 
 ## 2. Explore Home Assistant, read-only
 
@@ -134,7 +140,11 @@ needs and ask before each:
 - the **Terminal & SSH** add-on with the owner's public key
   (`ssh -o BatchMode=yes root@homeassistant.local true` succeeds);
 - Node.js 22.18 or later and pnpm, for the specs and replay;
-- a folder for the working copy (a private git repository, never a public one).
+- a folder for the working copy (a private git repository, never a public one);
+- a long-lived Home Assistant token of an administrator in
+  `~/.config/teobeanie/ha-token`, for the house typings and replay only ("The command
+  line needs a Home Assistant token" in `docs/getting-started.md`). Exploring did not
+  need it.
 
 Say what happened so far: the house was read, nothing was changed, so there is nothing
 to undo.

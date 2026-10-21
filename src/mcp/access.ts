@@ -5,6 +5,10 @@
 // add-on's `mcp_networks` option, or MCP_NETWORKS), by default the private LAN ranges
 // and Tailscale's, so the tools are reachable from the house's own network and the
 // tailnet, never from a public address. Standalone, only loopback may connect.
+//
+// The second door is the add-on's own port (8199, agents.ts): it serves only /mcp, and
+// every request carries an agent token minted in the panel. There the client is the
+// connection's peer itself, which must be in the same networks.
 
 import { BlockList, isIP } from "node:net";
 
@@ -34,12 +38,21 @@ const INTERNAL = (() => {
 })();
 
 export interface Caller {
-  via: "ingress" | "local";
+  /** The door: HA ingress, loopback (standalone), or the agent port with a token. */
+  via: "ingress" | "local" | "agent";
   /** HA user, from the ingress session. */
   user?: string;
   userId?: string;
-  /** The client's address as HA saw it. */
+  /** The agent token's name and id, on the agent port. */
+  agent?: string;
+  tokenId?: string;
+  /** The client's address as HA saw it, or the agent port's peer. */
   address?: string;
+}
+
+/** Who called, in one word: `agent:<token name>`, the HA user, or the door. */
+export function callerLabel(c: Partial<Caller>): string {
+  return c.agent !== undefined ? `agent:${c.agent}` : (c.user ?? c.via ?? "?");
 }
 
 export type Access = { ok: true; caller: Caller } | { ok: false; reason: string };
@@ -91,4 +104,36 @@ export function checkAccess(
   const user = header("x-remote-user-display-name") ?? header("x-remote-user-name");
   const userId = header("x-remote-user-id");
   return { ok: true, caller: { via: "ingress", address, ...(user ? { user } : {}), ...(userId ? { userId } : {}) } };
+}
+
+/** A refusal on the agent port carries its HTTP status: 403 network, 429 too many failures, 401 token. */
+export type AgentAccess = { ok: true; caller: Caller } | { ok: false; status: 401 | 403 | 429; reason: string };
+
+/**
+ * The agent port's check: the peer in the allowed networks (X-Forwarded-For is not
+ * read here: nothing in front of this port appends it), not over its failed attempts,
+ * and `Authorization: Bearer <agent token>` valid.
+ */
+export function checkAgentAccess(
+  peer: string | undefined,
+  authorization: string | undefined,
+  allowed: BlockList,
+  tokens: { verify(token: string): { id: string; name: string } | undefined },
+  limiter: { blocked(address: string): boolean; fail(address: string): void },
+): AgentAccess {
+  const address = plain(peer ?? "");
+  const f = family(address);
+  if (f === undefined || !allowed.check(address, f)) return { ok: false, status: 403, reason: `client ${address || "unknown"} is not in the allowed networks` };
+  if (limiter.blocked(address)) return { ok: false, status: 429, reason: `too many failed attempts from ${address}: wait a few minutes` };
+  const m = /^Bearer\s+(\S+)\s*$/i.exec(authorization ?? "");
+  if (m === null) {
+    limiter.fail(address);
+    return { ok: false, status: 401, reason: "an agent token is needed: Authorization: Bearer <token> (mint one on the panel's Connect page)" };
+  }
+  const token = tokens.verify(m[1]!);
+  if (token === undefined) {
+    limiter.fail(address);
+    return { ok: false, status: 401, reason: "the agent token is not valid, or was revoked" };
+  }
+  return { ok: true, caller: { via: "agent", agent: token.name, tokenId: token.id, address } };
 }

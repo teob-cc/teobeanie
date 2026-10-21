@@ -1,6 +1,7 @@
-// server.ts — single HTTP server on :8099: ingress panel (static), read API, the MCP
+// server.ts — the HTTP server on :8099: ingress panel (static), read API, the MCP
 // endpoint, /health for the supervisor watchdog. All URLs relative so the page works
-// behind ingress.
+// behind ingress. A second, small server on the agent port (8199) serves /mcp and
+// nothing else, for agents with a token (agentApp below).
 
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -18,6 +19,7 @@ import { mountCommand } from "./command.js";
 import { mountTimeline, type HouseRecord } from "./mcp/timeline.js";
 import { mountInstanceMode } from "./working-set.js";
 import { mountInstances } from "./instances.js";
+import { mountConnect, type ConnectDeps } from "./connect.js";
 import type { PackageInfo } from "./packages/library.js";
 import type { AnyHeuristic, CommandSource } from "./kernel/heuristic.js";
 
@@ -57,6 +59,8 @@ export interface ServerDeps {
   log?: (level: "info", msg: string) => void;
   /** Mounts the MCP endpoint (/mcp). */
   mcp?: (app: Hono) => void;
+  /** The Connect page: agent tokens and the agent port (api/connect, api/agent-tokens). */
+  connect?: ConnectDeps;
   panelDistDir: string;
 }
 
@@ -103,6 +107,7 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
   if (deps.command !== undefined) mountCommand(app, { mode: deps.studio.mode, command: deps.command, ...(deps.log !== undefined ? { log: deps.log } : {}) });
   if (deps.record !== undefined) mountTimeline(app, deps.record);
   deps.mcp?.(app);
+  if (deps.connect !== undefined) mountConnect(app, deps.connect);
 
   app.all("/api/*", async (c) => (await deps.readApi.handle(c.req.raw)) ?? c.json({ error: "NotFound" }, 404));
 
@@ -148,5 +153,23 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
   }
 
   const server = serve({ fetch: app.fetch, port, hostname: "0.0.0.0" });
+  return { close: () => server.close() };
+}
+
+/**
+ * The agent port's app: /mcp behind the agent token, and nothing else. No panel, no
+ * read API, no writes, no health: every other path is a 404.
+ */
+export function agentApp(mountMcp: (app: Hono) => void): Hono {
+  const app = new Hono();
+  mountMcp(app);
+  app.all("*", (c) => c.json({ error: "NotFound", reason: "this port serves only /mcp" }, 404));
+  return app;
+}
+
+/** A port that cannot be opened is logged; the rest of the add-on runs on. */
+export function startAgentServer(mountMcp: (app: Hono) => void, port: number, onError: (err: Error) => void): RunningServer {
+  const server = serve({ fetch: agentApp(mountMcp).fetch, port, hostname: "0.0.0.0" });
+  server.on("error", onError);
   return { close: () => server.close() };
 }

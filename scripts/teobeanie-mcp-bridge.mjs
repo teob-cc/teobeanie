@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// teobeanie-mcp-bridge.mjs — use the add-on's MCP tools from a local MCP client (Claude
-// Code, Claude Desktop, ...) over stdio. The tools are served only through Home
-// Assistant ingress, so this bridge authenticates to Home Assistant with a long-lived
-// token (an admin's), opens an ingress session and forwards each JSON-RPC message to
-// the add-on's /mcp. Point HA_URL at Home Assistant's address on your LAN or your
+// teobeanie-mcp-bridge.mjs — the fallback way to the add-on's MCP tools from a local
+// MCP client (Claude Code, Claude Desktop, ...) over stdio. The usual way is the
+// add-on's agent port with a token from the panel's Connect page; this bridge goes
+// through Home Assistant ingress instead, for a client that speaks only stdio or an
+// add-on whose agent port is closed. It authenticates to Home Assistant with a
+// long-lived token (an admin's), opens an ingress session and forwards each JSON-RPC
+// message to the add-on's /mcp. Point HA_URL at Home Assistant's address on your LAN or your
 // tailnet: the add-on accepts MCP only from the networks in its `mcp_networks` option
 // (the private LAN ranges and Tailscale by default).
 //
