@@ -17,6 +17,7 @@ import type { InstanceInfo } from "../kernel/host.js";
 import type { InputSummary } from "../kernel/step.js";
 import { CONTROL_CATEGORY } from "../pause.js";
 import { CONFIG_CATEGORY } from "../working-set.js";
+import { callerLabel, type Caller } from "./access.js";
 
 /**
  * Where the working set's edits are journaled, as `ConfigChanged { at, file, by, summary,
@@ -394,8 +395,12 @@ export function createHouseRecord(deps: RecordDeps) {
         return `${String(p["domain"])}.${String(p["service"])} ${ids.length > 0 ? ids.join(", ") : "(outside the house scope)"}${typeof p["by"] === "string" ? ` by ${shownBy(p["by"])}` : ""}`;
       }
       case "ToolCalled": {
-        const caller = (p["caller"] ?? {}) as { user?: string; via?: string };
-        return `${String(p["tool"])} by ${caller.user ?? caller.via ?? "?"}${p["ok"] === false ? `: ${String(p["error"])}` : ""}`;
+        return `${String(p["tool"])} by ${callerLabel((p["caller"] ?? {}) as Partial<Caller>)}${p["ok"] === false ? `: ${String(p["error"])}` : ""}`;
+      }
+      case "AgentTokenMinted":
+        return `agent token "${String(p["name"])}" minted by ${String(p["by"])}`;
+      case "AgentTokenRevoked": {
+        return `agent token ${String(p["id"])} revoked by ${String(p["by"])}`;
       }
       case "Paused":
         return `paused by ${String(p["by"])}${p["reason"] !== undefined ? `: ${String(p["reason"])}` : ""}`;
