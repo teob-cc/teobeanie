@@ -307,7 +307,7 @@ this.
 
 | Integration | Direction | Used for |
 |---|---|---|
-| **HA websocket** | both | `state_changed` and `call_service` events; triggers (`subscribe_trigger`); `callService`; `get_states` snapshots on every (re)connect; `config/auth/list`; the entity, device and area registries; `get_config` (time zone); recorder history and statistics |
+| **HA websocket** | both | `state_changed` and `call_service` events; triggers (`subscribe_trigger`); `callService`; `get_states` snapshots on every (re)connect; `config/auth/list`; the entity, device and area registries and their update events; `homeassistant/expose_entity/list` and `get_services` (the explore tools); `get_config` (time zone); recorder history and statistics |
 | **HA REST** (`/api/template`) | out | resolving a device id to its entities |
 | **HA ingress** | in | the panel, the read API and `/mcp`; the Studio and reload writes accept only the ingress peer |
 | **Supervisor API** | out, scripts only | deploy, options, restart (the add-on itself never calls it) |
@@ -322,7 +322,7 @@ The surfaces, all behind ingress:
 |---|---|
 | **Panel** | House (the whole scope, grouped and live), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it); in the header, the global pause with who paused and when |
 | **Read API** | `health`, `api/heuristics`, `api/house`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
-| **MCP** (`/mcp`) | read-only tools: `house_scope`, `house_state`, `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`; every call journaled with its caller; a stdio bridge script connects a desktop client through HA's ingress session, from the LAN or the tailnet |
+| **MCP** (`/mcp`) | read-only tools. The house scope: `house_scope`, `house_state` (with the instances' cards), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`. All of HA, never recorded (only the call): `ha_registry` (areas, devices, entities; filters and pages), `ha_states`, `ha_history` (at most 7 days, 2000 points a page), `ha_services`, `suggest` (packages whose roles the registry fills, pre-bound). Every call journaled with its caller; a stdio bridge script connects a desktop client through HA's ingress session, from the LAN or the tailnet |
 | **Telegram** | notices, command replies, the monitor's alerts and the daily summary; `/commands` |
 | **CLI** (`dist/studio/cli.js`) | `init` (a starter working set with the starter packages), `types` (generate the house typings) and `replay`; both read the folder's packages, and the starter ones it does not have yet |
 | **Monitor** | posts to the chat when HA has been unreachable, an action was refused or failed, a heuristic threw, a system user switched an entity an active instance controls, or someone paused or resumed the heuristics; one message per problem until it clears, at most six an hour; an optional daily summary |
@@ -422,8 +422,8 @@ One historical exception stays:
 
 The add-on declares the agent's options (`llm_provider`: none, OpenRouter or Ollama;
 model, key, URL, a monthly budget) but nothing reads them. What it does have is the
-agent's view of the house: the MCP tools, all read-only, scope-limited, journaled with
-their caller, and the design decision behind them, that a model reads the same record a
+agent's view of the house: the MCP tools, all read-only, journaled with their caller,
+scope-limited except the explore tools, which read all of HA and record none of it, and the design decision behind them, that a model reads the same record a
 person does and nothing more. The framework it builds on (teob-ts `ai`) ships the
 pieces: an `LLMService` with OpenRouter and OpenAI-compatible factories (`chatWithTools`,
 tracked variants for cost), a spend guard, a tool registry over the same `MCPTool` type
@@ -520,9 +520,10 @@ src/
     simulate.ts      the simulator used by tests and the Studio worker
     custom.ts        importing a house's files and packages ("teobeanie" alias)
     clock.ts         local-time helpers
-  packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts
+  packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts, suggest.ts (roles matched to the registry)
   house/             the House view: layout, summary, live service
-  mcp/               tools, timeline (chain, signals, timeline), access (ingress peer + allowed networks), the mcp-audit stream
+  mcp/               tools, ha-tools (explore all of HA), timeline (chain, signals, timeline), access (ingress peer + allowed networks), the mcp-audit stream
+  ha-registry.ts     HA's area, device and entity registries for the explore tools, refreshed on registry events
   studio/            cli (types, replay), house typings, file API
   audit.ts           the ha-audit aggregate; attribution.ts: who made each call
   projections.ts     the call timeline view

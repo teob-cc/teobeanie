@@ -21,8 +21,9 @@ does the rest with you, and asks before anything that changes the house.
    folder (`mkdir -p ~/.config/teobeanie`), paste the token into that file with an
    editor, and keep it to yourself (`chmod 600 ~/.config/teobeanie/ha-token`).
 
-   Make it as an administrator: the bridge opens an ingress session with it, and the
-   agent reads the house with it.
+   Make it as an administrator: the bridge opens an ingress session with it. The agent
+   reads the house through Teobeanie's tools, so you do not need Home Assistant's own
+   MCP server.
 
 3. **Connect your agent.**
 
@@ -52,8 +53,9 @@ does the rest with you, and asks before anything that changes the house.
 
 ## What happens next
 
-The agent checks the connection, reads your house and sums it up in one table, one row
-per area. It suggests three starter packages that fit what you have: a light that
+The agent checks the connection, reads your house through Teobeanie (the areas,
+devices and entities, their states, the recorder's history) and sums it up in one
+table, one row per area. Nothing it reads outside the house scope is recorded. It suggests three starter packages that fit what you have: a light that
 follows a motion sensor, a reminder for a door left open, a leak guard. Each comes with
 the entities it would use and one sentence on why. You pick.
 
@@ -112,6 +114,7 @@ agent that reads instructions can follow them.
 | A reload was rejected after a push | The add-on keeps the previous config. The reason is in the add-on's log (Settings → Add-ons → Teobeanie → Log) and on the panel's Heuristics tab. Fix the file, commit, push again |
 | An instance stays in shadow after "active" | Someone turned the add-on's `shadow_mode` emergency switch on. Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
 
-Teobeanie is alpha (0.2). The MCP tools are read-only today. MCP tools to explore Home
-Assistant, and to develop and operate behaviours, are on the
+Teobeanie is alpha (0.2). The MCP tools are read-only today. They explore all of Home
+Assistant (`ha_registry`, `ha_states`, `ha_history`, `ha_services`, `suggest`) and the
+house scope's record. MCP tools to develop and operate behaviours are on the
 [roadmap](../README.md#roadmap), not yet in the add-on.

@@ -6,7 +6,8 @@
 // the house.
 //
 // Only the house scope exists here. An entity outside allowlist.json is reported as
-// outside the scope, never read. Times are house-local.
+// outside the scope, never read: the ha_* tools (ha-tools.ts) read the rest of Home
+// Assistant, without recording it. Times are house-local.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import type { HaEntityState, SignalQuery, SignalRow } from "@lambda-house/teob-t
 import type { HouseScope } from "../allowlist.js";
 import { houseZone } from "../kernel/clock.js";
 import type { InstanceInfo } from "../kernel/host.js";
+import type { InstanceCard } from "../kernel/card.js";
 import { readOutdoor, type HouseFacts, type Observed } from "../kernel/heuristic.js";
 import { normalizeState } from "@lambda-house/teob-ts/ha";
 import { SOURCE_NAME, listSources } from "../studio/files.js";
@@ -43,6 +45,8 @@ export interface HouseToolDeps {
   house: HouseFacts;
   /** The behaviour packages the running set was loaded with (packages/ in the config folder). */
   packages?: () => PackageInfo[];
+  /** The instances' cards as they stand now (host.cards()): house_state shows them. */
+  cards?: () => InstanceCard[];
   caller(): Caller | undefined;
   now?: () => number;
 }
@@ -60,33 +64,33 @@ export const localTime = (ms: number, timeZone: string): string => {
   return f.format(ms);
 };
 
-type Args = Record<string, unknown>;
-const num = (a: Args, key: string, def: number, min: number, max: number): number => {
+export type Args = Record<string, unknown>;
+export const num = (a: Args, key: string, def: number, min: number, max: number): number => {
   const v = a[key];
   if (v === undefined) return def;
   if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`${key} must be a number`);
   return Math.min(max, Math.max(min, v));
 };
-const str = (a: Args, key: string): string | undefined => {
+export const str = (a: Args, key: string): string | undefined => {
   const v = a[key];
   if (v === undefined) return undefined;
   if (typeof v !== "string") throw new Error(`${key} must be a string`);
   return v;
 };
-const strs = (a: Args, key: string): string[] | undefined => {
+export const strs = (a: Args, key: string): string[] | undefined => {
   const v = a[key];
   if (v === undefined) return undefined;
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw new Error(`${key} must be a list of strings`);
   return v as string[];
 };
-const bool = (a: Args, key: string, def: boolean): boolean => {
+export const bool = (a: Args, key: string, def: boolean): boolean => {
   const v = a[key];
   if (v === undefined) return def;
   if (typeof v !== "boolean") throw new Error(`${key} must be true or false`);
   return v;
 };
 
-function tool(name: string, description: string, properties: Record<string, unknown>, run: (args: Args) => Promise<unknown> | unknown): MCPTool {
+export function tool(name: string, description: string, properties: Record<string, unknown>, run: (args: Args) => Promise<unknown> | unknown): MCPTool {
   return {
     name,
     description,
@@ -171,7 +175,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
   return [
     tool(
       "house_scope",
-      "The house scope: how many Home Assistant entities Teobeanie observes, by domain, and the ones it may operate. Anything else in Home Assistant is outside the house and invisible to these tools.",
+      "The house scope: how many Home Assistant entities Teobeanie observes, by domain, and the ones it may operate. Anything else in Home Assistant is outside the house: ha_registry and ha_states read it, without recording it.",
       {},
       () => {
         const byDomain: Record<string, { observed: number; operable: number }> = {};
@@ -192,7 +196,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
 
     tool(
       "house_state",
-      "Current state of the entities in the house scope: state, unit, when it last changed (house time) and whether Teobeanie may operate it. Filter by domain, by entity ids, to operable ones, or to those changed in the last N minutes.",
+      "Current state of the entities in the house scope: state, unit, when it last changed (house time) and whether Teobeanie may operate it, and each heuristic instance's card (what the House page shows for it). Filter by domain, by entity ids, to operable ones, or to those changed in the last N minutes.",
       {
         domain: { type: "string", description: "e.g. light, binary_sensor" },
         entities: { type: "array", items: { type: "string" }, description: "entity ids" },
@@ -222,7 +226,14 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
           })
           .filter((r) => within === undefined || (Number.isFinite(r.sinceMs) && r.sinceMs >= now() - within * MINUTE))
           .map(({ sinceMs: _drop, ...r }) => r);
-        return { time_zone: zone(), now: local(now()), count: rows.length, entities: rows, ...(outside.length > 0 ? { outside_scope: outside } : {}) };
+        return {
+          time_zone: zone(),
+          now: local(now()),
+          count: rows.length,
+          entities: rows,
+          ...(outside.length > 0 ? { outside_scope: outside } : {}),
+          ...(deps.cards !== undefined ? { cards: deps.cards() } : {}),
+        };
       },
     ),
 
@@ -491,7 +502,9 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
   ];
 }
 
-export const INSTRUCTIONS = `Teobeanie, the house's event-sourced assistant agent: the house as it sees it. Only the entities in the house scope (allowlist.json) exist here; everything else in Home Assistant is deliberately outside it. These tools are read-only.
-Start with house_scope and house_state; recent_changes says who changed what (Teobeanie, a person, a system user such as the Supervisor, an automation, the device); decisions shows Teobeanie's reasoning and what became of each action; heuristics and heuristic_source show the logic. Heuristic instances in "shadow" mode decide and journal but never act.
+export const INSTRUCTIONS = `Teobeanie, the house's event-sourced assistant agent. Every tool here is read-only: none of them switches anything (behaviours act, through the SafeActuator). Every call you make is journaled (tool_calls).
+First call whoami (the connection and the house's time zone), then house_scope and house_state: the house scope (allowlist.json) is what Teobeanie observes and may operate, with each instance's card. heuristics lists the instances that run; if there are none, this is a first setup.
+To explore all of Home Assistant, outside the scope too, use ha_registry (areas, devices, entities), ha_states (current states), ha_history (the recorder, any entity) and ha_services (services and their fields, for writing behaviours); suggest says which behaviour packages fit, with their entities bound. Nothing they read is recorded, so Home Assistant's own MCP server is not needed.
+Inside the scope: recent_changes says who changed what (Teobeanie, a person, a system user such as the Supervisor, an automation, the device); decisions shows Teobeanie's reasoning and what became of each action; heuristics and heuristic_source show the logic. Heuristic instances in "shadow" mode decide and journal but never act.
 To explain why something happened, find its row (timeline, decisions, recent_changes) and walk its event_id or cause with chain; signals gives an entity's recorded rows over a range. For what happened around an entity or an instance, timeline merges changes, calls, decisions, the pause and config changes in time order. Cite the event_id or obs_id of the rows an answer rests on. Ranges take from and to as "HH:MM", "YYYY-MM-DD HH:MM" (house time) or ISO; a page that has more says so (more: pass it as cursor).
-Times are house-local (whoami and house_state give the zone). Every call you make is journaled (tool_calls).`;
+Times are house-local (whoami and house_state give the zone).`;

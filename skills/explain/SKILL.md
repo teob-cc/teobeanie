@@ -40,6 +40,7 @@ All of it is read-only MCP tools of the `teobeanie` server (in Claude Code:
 | `chain` | An event's causation chain back to its origin, and what it caused |
 | `signals` | One entity's recorded rows over a range, with `by`, `cause` and `obs_id` |
 | `history` | One entity's recorder history, further back than the signals |
+| `ha_history` | Any entity's recorder history, outside the scope too (read, never recorded) |
 | `heuristics` | Instances: mode, params, what each watches, reads and owns, last decision |
 | `heuristic_source` | A heuristic's code, from its package or the house's own files |
 | `tool_calls` | What agents (this one too) asked the tools |

@@ -50,7 +50,10 @@ happened, from the journal), `nodered-migration` (move Node-RED flows over, one 
   limits on every service call, and a global pause stops them all.
 - **Replay** runs a behaviour over recorded history before it touches anything.
 - **Your agent works on it over MCP.** Read-only tools give it the house scope, state,
-  who changed what, decisions and their chains, and the behaviours' source.
+  who changed what, decisions and their chains, and the behaviours' source. Others
+  explore all of Home Assistant (registries, states, history, services) and suggest
+  the packages that fit, without recording what they read: Home Assistant's own MCP
+  server is not needed.
 
 Built on [teob-ts](https://github.com/teob-cc/teob-ts), an event-sourcing framework.
 
@@ -93,10 +96,11 @@ the add-on's config folder, never in here.
 
 - Behaviour packages ✓
 - Cards on the House page ✓
+- MCP tools to explore Home Assistant ✓
 - Next:
   - facts (derived state)
   - revisions and rollback
-  - MCP tools to explore Home Assistant, and to develop and operate behaviours
+  - MCP tools to develop and operate behaviours
   - a Home Assistant notify channel
   - the landing page, teob.cc/home
 

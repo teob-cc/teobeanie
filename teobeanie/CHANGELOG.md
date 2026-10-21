@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Explore Home Assistant over MCP.** New read-only tools read all of Home Assistant
+  through Teobeanie, outside the house scope too: `ha_registry` (areas, devices,
+  entities), `ha_states`, `ha_history` (at most 7 days a call) and `ha_services`.
+  Nothing they read is recorded, only the call. Home Assistant's own MCP server is not
+  needed. `suggest` names the behaviour packages whose roles your entities fill, with
+  the instance's entities bound, the same area's first. `house_state` also returns the
+  instances' cards. The onboard skill uses these tools instead of Home Assistant's REST
+  API.
+
 ## 0.2.0 — first public alpha
 
 Teobeanie runs a house's behaviours as small pure functions written in TypeScript,
