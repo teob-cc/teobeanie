@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — facts, revisions, explore and connect
 
 - **Revisions and rollback.** Every applied change to the config folder is a numbered
   revision, its files kept under `/data/revisions`; the Heuristics tab lists them with

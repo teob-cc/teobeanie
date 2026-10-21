@@ -1,5 +1,5 @@
 name: Teobeanie
-version: "0.2.0"
+version: "0.3.0"
 slug: teobeanie
 description: Behaviours for Home Assistant as tested pure functions, with a journal of every decision, built with your own AI agent over MCP
 url: https://github.com/teob-cc/teobeanie

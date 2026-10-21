@@ -4,7 +4,7 @@ Behaviours for Home Assistant as tested pure functions, with a journal of every
 decision, built with your own AI agent over MCP. Every decision the house makes is a
 journaled event you can inspect, explain and replay.
 
-> **Status: alpha (0.2).** Heuristics run in shadow mode by default: they decide and
+> **Status: alpha (0.3).** Heuristics run in shadow mode by default: they decide and
 > journal, and never act until you allow it. See the
 > [roadmap](https://github.com/teob-cc/teobeanie#roadmap).
 
