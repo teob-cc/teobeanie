@@ -7,11 +7,17 @@
 // config reload (prepare, then commit) stops and starts only the instances that
 // changed. Stopping a runtime cancels the instance's in-memory timers; the new one
 // replays the stream and re-arms them, as after a restart.
+//
+// The facts (fact.ts) run here too, ahead of the instances: on a signal the facts that
+// read the entity are evaluated first (so a decision on the same signal sees them), a
+// change is journaled as FactChanged in teob-fact/<id>, and the instances that declare
+// the fact get a fact input. A fact's time conditions wake it on a timer of the host's.
+// At boot each fact's stream is folded, and the start evaluates every fact again.
 
 import { cpSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CategoryId, EntityId, categoryTypes, type EntityRuntime, type Journal, type OnPersisted } from "@lambda-house/teob-ts/core";
+import { CategoryId, EntityId, SequenceNr, categoryTypes, tagCodec, ulid, type EntityRuntime, type Journal, type JournalReader, type OnPersisted } from "@lambda-house/teob-ts/core";
 import { createInMemoryRuntime, registration } from "@lambda-house/teob-ts/inmem";
 import { normalizeState, type HaClient, type HaEntityState, type SignalRow } from "@lambda-house/teob-ts/ha";
 import { commandArgs, outdoorEntities, type AnyHeuristic, type CommandSource, type HouseFacts, type Input, type Observed } from "./heuristic.js";
@@ -21,6 +27,8 @@ import { notifyPerHourProblem } from "./instance-check.js";
 import { DEFAULT_NOTIFY_PER_HOUR, compileHeuristic, type KCommand } from "./kernel.js";
 import type { HouseScope } from "../allowlist.js";
 import { instanceCard, type InstanceCard } from "./card.js";
+import { FACT_CATEGORY, FACT_TAGS, createFactEngine, planFacts, type AnyFact, type FactEngine, type FactEvent, type FactPlan, type FactStep, type FactTrigger } from "./fact.js";
+import type { Json } from "./heuristic.js";
 
 export interface InstanceConfig {
   heuristic: string;
@@ -61,6 +69,8 @@ export interface InstanceInfo {
   actuates: string[];
   /** Entities another instance owns and shares, which this one operates too. */
   uses: string[];
+  /** The facts it reads (fact ids): their changes wake it. */
+  facts: string[];
   commands: string[];
   pattern?: string;
   triggers: string[];
@@ -82,6 +92,7 @@ interface Instance {
   entities: string[];
   actuates: string[];
   uses: string[];
+  facts: string[];
   commands: string[];
   /** Menu descriptions by command: the instance's own, else the heuristic's. */
   commandHelp: Record<string, string>;
@@ -128,9 +139,29 @@ export function loadInstances(dataDir: string, log: Log): InstanceConfig[] {
   return parsed.instances;
 }
 
+/** A fact as the House view, the read API and the tools show it. */
+export interface FactInfo {
+  id: string;
+  title: string;
+  description?: string;
+  unit?: string;
+  /** Its value now; null with known false while it has none yet. */
+  value: Json;
+  known: boolean;
+  /** When it took this value, ms epoch (null while unknown). */
+  since: number | null;
+  /** The entities whose changes re-evaluate it, and the facts it reads. */
+  watch: string[];
+  facts: string[];
+  /** The instances that read it (keys). */
+  readers: string[];
+}
+
 /** What a host runs: the library, heuristics.json's instances and the house they run in. */
 export interface HostConfig {
   library: AnyHeuristic[];
+  /** The facts the packages and the house's files define (fact.ts). */
+  facts?: AnyFact[];
   instances: InstanceConfig[];
   /** The house's scope: an instance that watches, reads or owns anything outside it is not started. */
   scope?: HouseScope;
@@ -184,6 +215,8 @@ export interface HeuristicHost {
   commandKeyboard(name: string): CommandKeyboard | undefined;
   /** The card of every active and shadow instance whose heuristic has a view(), as it stands now. */
   cards(): InstanceCard[];
+  /** Every fact that runs, with its value and since. */
+  facts(): FactInfo[];
   onSignal(row: SignalRow): void;
   /** Call once the live cache holds the first full states snapshot. */
   start(ha: Pick<HaClient, "subscribeTrigger">): Promise<void>;
@@ -210,6 +243,10 @@ interface Plan {
   choices: Map<string, string[]>;
   menu: MenuCommand[];
   attributeWatched: Set<string>;
+  /** The facts that run, in dependency order. */
+  facts: FactPlan;
+  /** fact id → keys of the instances it wakes. */
+  factWatchers: Map<string, string[]>;
 }
 
 /**
@@ -219,7 +256,11 @@ interface Plan {
 function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
   const defs = new Map(cfg.library.map((d) => [d.id, d]));
   const outdoor = outdoorEntities(cfg.house?.outdoor);
-  const problems: string[] = [];
+  const facts = planFacts(cfg.facts ?? [], {
+    ...(cfg.scope !== undefined ? { observes: (e: string) => cfg.scope!.observes(e) } : {}),
+    ...(cfg.house?.outdoor !== undefined ? { outdoor: cfg.house.outdoor } : {}),
+  });
+  const problems: string[] = [...facts.problems];
   const candidates: Instance[] = [];
   for (const c of cfg.instances) {
     const def = defs.get(c.heuristic);
@@ -262,15 +303,23 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
         continue;
       }
     }
+    // The facts it reads, by id: each must run.
+    const factNames = def.facts?.(c.params) ?? [];
+    const unknownFacts = factNames.filter((n) => !facts.aliases.has(n));
+    if (unknownFacts.length > 0) {
+      problems.push(`${key} reads fact ${unknownFacts.join(", ")}, which no running fact defines`);
+      continue;
+    }
+    const factIds = [...new Set(factNames.map((n) => facts.aliases.get(n)!))];
     const entities = [...new Set([...watch, ...reads, ...(def.usesOutdoor ? outdoor : [])])];
     const commands = def.commands?.(c.params) ?? [];
     const fingerprint = JSON.stringify([
-      c.params, mode, configuredMode, watch, entities, actuates, uses, commands, c.alerts === true, c.notifyPerHour ?? null,
+      c.params, mode, configuredMode, watch, entities, actuates, uses, factIds, commands, c.alerts === true, c.notifyPerHour ?? null,
       def.shares?.(c.params) ?? [], def.forbids?.(c.params) ?? [], def.watchAttributes?.(c.params) ?? [],
       def.triggers?.(c.params) ?? {}, def.usesOutdoor ? (cfg.house?.outdoor ?? null) : null,
     ]);
     const commandHelp = { ...def.commandHelp?.(c.params), ...c.commandHelp };
-    candidates.push({ key, def, id: c.id, params: c.params, configuredMode, mode, watch, entities, actuates, uses, commands, commandHelp, alerts: c.alerts === true, ...(c.notifyPerHour !== undefined ? { notifyPerHour: c.notifyPerHour } : {}), fingerprint });
+    candidates.push({ key, def, id: c.id, params: c.params, configuredMode, mode, watch, entities, actuates, uses, facts: factIds, commands, commandHelp, alerts: c.alerts === true, ...(c.notifyPerHour !== undefined ? { notifyPerHour: c.notifyPerHour } : {}), fingerprint });
   }
 
   // Owners first, then the instances that use what an owner shares (a press on a
@@ -291,7 +340,9 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
     }
     forbids.push(...(inst.def.forbids?.(inst.params) ?? []));
   }
-  const plan: Plan = { instances: [], problems, claims: [], uses: [], forbids, watchers: new Map(), commandees: new Map(), choices: new Map(), menu: [], attributeWatched: new Set() };
+  const plan: Plan = { instances: [], problems, claims: [], uses: [], forbids, watchers: new Map(), commandees: new Map(), choices: new Map(), menu: [], attributeWatched: new Set(), facts, factWatchers: new Map() };
+  // A fact reads the outdoor conditions: the weather's readings are signals.
+  if (cfg.house?.outdoor?.weather !== undefined && facts.facts.some((f) => f.usesOutdoor)) plan.attributeWatched.add(cfg.house.outdoor.weather);
   for (const inst of candidates) {
     const unshared = inst.uses.filter((e) => !shared.has(e));
     if (unshared.length > 0) {
@@ -303,6 +354,7 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
     plan.claims.push([inst.key, inst.actuates]);
     if (inst.uses.length > 0) plan.uses.push([inst.key, inst.uses]);
     for (const e of inst.watch) plan.watchers.set(e, [...(plan.watchers.get(e) ?? []), inst.key]);
+    for (const f of inst.facts) plan.factWatchers.set(f, [...(plan.factWatchers.get(f) ?? []), inst.key]);
     for (const c of inst.commands) plan.commandees.set(c, [...(plan.commandees.get(c) ?? []), inst.key]);
     for (const [c, arg] of Object.entries(inst.def.commandArg?.(inst.params) ?? {})) plan.choices.set(c, [...(plan.choices.get(c) ?? []), ...commandArgs(arg)].sort());
     for (const e of inst.def.watchAttributes?.(inst.params) ?? []) plan.attributeWatched.add(e);
@@ -315,6 +367,11 @@ function planInstances(cfg: HostConfig, forceShadow: boolean): Plan {
   plan.menu.sort((a, b) => a.command.localeCompare(b.command));
   return plan;
 }
+
+/** What a plan routes: the instances' watched entities and the facts'. */
+const routed = (p: Plan): string[] => [...new Set([...p.watchers.keys(), ...[...p.facts.entities.values()].flat()])];
+
+const factCodec = tagCodec<FactEvent>(...FACT_TAGS);
 
 /** One instance at run time. */
 interface Running {
@@ -341,6 +398,8 @@ export function createHeuristicHost(
     timeZone?: () => string | undefined;
     /** An instance's state moved (or it decided on an input): its card may have changed. */
     onCardChange?: () => void;
+    /** A fact's value changed. */
+    onFactChange?: () => void;
   },
 ): HeuristicHost {
   let scope = opts.scope;
@@ -385,6 +444,84 @@ export function createHeuristicHost(
   let ha: Pick<HaClient, "subscribeTrigger"> | undefined;
   let wakeTimer: ReturnType<typeof setInterval> | undefined;
 
+  // ---- facts ----
+  const newFactEngine = (p: Plan): FactEngine =>
+    createFactEngine(p.facts, { observe, house: liveHouse, newId: ulid, onError: (id, err) => opts.log("error", `fact ${id}: ${err}`) });
+  let facts = newFactEngine(plan);
+  /** Each fact stream's last sequence number. */
+  const factSeq = new Map<string, number>();
+  let factTimer: ReturnType<typeof setTimeout> | undefined;
+  const factReading = (name: string) => facts.reading(name);
+
+  /** Fold a fact's stream (at attach, or when a reload adds it). */
+  const recoverFact = (id: string): void => {
+    if (journal === undefined || factSeq.has(id)) return;
+    const rows = journal.loadEvents(CategoryId(FACT_CATEGORY), EntityId(id), SequenceNr(0), factCodec);
+    const last = (journal as Partial<JournalReader>).queryEvents?.({ category: FACT_CATEGORY, entityId: id, order: "desc", limit: 1 })[0]?.envelope?.eventId;
+    facts.restore(id, rows.map((r, i) => ({ event: r.event, ...(i === rows.length - 1 && last !== undefined ? { eventId: last } : {}) })));
+    factSeq.set(id, rows.length > 0 ? rows[rows.length - 1]!.sequenceNr : 0);
+  };
+
+  const persistFacts = (steps: FactStep[]): void => {
+    if (journal === undefined) return;
+    for (const step of steps) {
+      const category = CategoryId(FACT_CATEGORY);
+      const entityId = EntityId(step.fact);
+      const start = factSeq.get(step.fact) ?? 0;
+      const envelopes = step.events.map((e) => ({
+        eventId: e.eventId,
+        v: 1,
+        origin: "heuristic",
+        correlationId: `fact/${step.fact}`,
+        ...(e.causationId !== undefined ? { causationId: e.causationId } : {}),
+      }));
+      try {
+        const next = journal.persistEvents(category, entityId, step.events.map((e) => e.event), SequenceNr(start), factCodec, envelopes);
+        factSeq.set(step.fact, next);
+        onPersisted?.({
+          category,
+          entityId,
+          at: Date.now(),
+          records: step.events.map((e, i) => ({ sequenceNr: SequenceNr(start + i + 1), manifest: e.event.tag, encoded: e.event, envelope: envelopes[i]! })),
+        });
+      } catch (err) {
+        opts.log("error", `fact ${step.fact}: could not journal: ${String(err)}`);
+      }
+    }
+  };
+
+  /** Evaluate the facts a trigger concerns, journal what changed, and wake them again when due. */
+  const runFacts = (trigger: FactTrigger, now: number): FactStep[] => {
+    const steps = facts.run(trigger, now);
+    persistFacts(steps);
+    if (steps.some((s) => s.changed !== undefined)) opts.onFactChange?.();
+    scheduleFacts();
+    return steps;
+  };
+
+  /** A changed fact is an input of the instances that read it. */
+  const deliverFacts = (steps: FactStep[], at: number): void => {
+    for (const s of steps) {
+      if (s.changed === undefined) continue;
+      for (const key of plan.factWatchers.get(s.fact) ?? []) {
+        send(running.get(key), { kind: "fact", at, fact: s.fact, value: s.changed.value, since: s.changed.since, eventId: s.changed.eventId });
+      }
+    }
+  };
+
+  const scheduleFacts = (): void => {
+    if (factTimer !== undefined) clearTimeout(factTimer);
+    factTimer = undefined;
+    const due = facts.nextWake();
+    if (due === undefined || ha === undefined) return;
+    factTimer = setTimeout(() => {
+      factTimer = undefined;
+      const at = Date.now();
+      deliverFacts(runFacts({ kind: "time" }, at), at);
+    }, Math.max(0, due - Date.now()));
+    factTimer.unref?.();
+  };
+
   const boot = (r: Running): void => {
     if (journal === undefined || r.runtime !== undefined || r.inst.mode === "off") return;
     const inst = r.inst;
@@ -394,6 +531,7 @@ export function createHeuristicHost(
       actuator: opts.actuator,
       log: opts.log,
       house: liveHouse,
+      fact: factReading,
       onState: (s) => {
         r.state = s;
         if (inst.def.view !== undefined) opts.onCardChange?.();
@@ -437,7 +575,7 @@ export function createHeuristicHost(
   const all = (): Running[] => [...running.values()];
 
   return {
-    watchedEntities: () => [...plan.watchers.keys()],
+    watchedEntities: () => routed(plan),
 
     attributeWatched: () => [...plan.attributeWatched],
 
@@ -453,6 +591,7 @@ export function createHeuristicHost(
         reads: i.entities.filter((e) => !i.watch.includes(e)),
         actuates: i.actuates,
         uses: i.uses,
+        facts: i.facts,
         commands: i.commands,
         ...(i.def.pattern !== undefined ? { pattern: i.def.pattern } : {}),
         triggers: Object.keys(i.def.triggers?.(i.params) ?? {}),
@@ -464,6 +603,7 @@ export function createHeuristicHost(
     attach(j, persisted) {
       journal = j;
       onPersisted = persisted;
+      for (const f of plan.facts.facts) recoverFact(f.id);
       for (const r of all()) boot(r);
     },
 
@@ -502,9 +642,29 @@ export function createHeuristicHost(
           : [instanceCard(inst.def, { key: inst.key, id: inst.id, params: inst.params, mode: inst.mode, entities: inst.entities, commands: inst.commands }, state, observe)],
       ),
 
+    facts: () =>
+      plan.facts.facts.map((f) => {
+        const r = facts.record(f.id);
+        const known = r?.value !== undefined;
+        return {
+          id: f.id,
+          title: f.title,
+          ...(f.description !== undefined ? { description: f.description } : {}),
+          ...(f.unit !== undefined ? { unit: f.unit } : {}),
+          value: r?.value ?? null,
+          known,
+          since: known ? r!.since : null,
+          watch: plan.facts.entities.get(f.id) ?? [],
+          facts: plan.facts.deps.get(f.id) ?? [],
+          readers: plan.factWatchers.get(f.id) ?? [],
+        };
+      }),
+
     onSignal(row) {
       // Boot baselines arrive before start(); the start input reconciles them instead.
       if (ha === undefined) return;
+      // Facts first: a decision on this signal sees them as they now are.
+      const steps = runFacts({ kind: "signal", entity: row.entityId, obsId: row.obsId }, row.at);
       const raw = row.raw as Partial<HaEntityState> | null;
       for (const key of plan.watchers.get(row.entityId) ?? []) {
         send(running.get(key), {
@@ -518,12 +678,15 @@ export function createHeuristicHost(
           ...(typeof raw?.context?.user_id === "string" ? { user: raw.context.user_id } : {}),
         });
       }
+      deliverFacts(steps, row.at);
     },
 
     async start(client) {
       if (ha !== undefined) return;
       ha = client;
       const at = Date.now();
+      // Every fact again, before the instances reconcile (their start reads them).
+      runFacts({ kind: "start" }, at);
       const now = all();
       for (const r of now) send(r, { kind: "start", at });
       for (const r of now) await subscribe(r);
@@ -559,7 +722,7 @@ export function createHeuristicHost(
       }
       return {
         changes,
-        watchedEntities: [...p.watchers.keys()],
+        watchedEntities: routed(p),
         attributeWatched: [...p.attributeWatched],
         async commit() {
           if (running !== base) throw new Error("the running set changed since this reload was prepared");
@@ -584,22 +747,35 @@ export function createHeuristicHost(
           plan = p;
           running = nextRunning;
           claim(p);
+          // The facts of the new set: those that ran keep their value, a new one is
+          // folded from its stream; all are evaluated again below.
+          const before = facts;
+          facts = newFactEngine(p);
+          for (const f of p.facts.facts) {
+            const r = before.record(f.id);
+            if (r !== undefined && factSeq.has(f.id)) facts.seed(f.id, r);
+            else recoverFact(f.id);
+          }
           await Promise.all(stopping.map(halt));
           // Each starts on its own stream: the runtime replays it and re-arms its
           // timers, and the start input reconciles it with the house as it is now.
           const at = Date.now();
+          const factSteps = ha !== undefined ? runFacts({ kind: "start" }, at) : [];
           for (const r of starting) {
             if (!r.live) continue;
             boot(r);
             if (ha !== undefined) send(r, { kind: "start", at });
           }
           await Promise.all(starting.filter((r) => r.live).map(subscribe));
+          // The instances that kept running hear of a fact that changed.
+          deliverFacts(factSteps, at);
         },
       };
     },
 
     async stop() {
       if (wakeTimer !== undefined) clearInterval(wakeTimer);
+      if (factTimer !== undefined) clearTimeout(factTimer);
       await Promise.all(all().map(halt));
     },
   };

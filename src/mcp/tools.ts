@@ -15,7 +15,7 @@ import type { JournalReader } from "@lambda-house/teob-ts/core";
 import type { HaEntityState, SignalQuery, SignalRow } from "@lambda-house/teob-ts/ha";
 import type { HouseScope } from "../allowlist.js";
 import { houseZone } from "../kernel/clock.js";
-import type { InstanceInfo } from "../kernel/host.js";
+import type { FactInfo, InstanceInfo } from "../kernel/host.js";
 import { readOutdoor, type HouseFacts, type Observed } from "../kernel/heuristic.js";
 import { normalizeState } from "@lambda-house/teob-ts/ha";
 import { SOURCE_NAME, listSources } from "../studio/files.js";
@@ -36,6 +36,8 @@ export interface HouseToolDeps {
   /** HA users by id (the audit's directory); one over deps.ha when absent. */
   users?: UserDirectory;
   instances(): InstanceInfo[];
+  /** The facts (derived state) with their values: house_state shows them, timeline their changes. */
+  facts?(): FactInfo[];
   /** The global pause (pause.ts). */
   pause?(): PauseState;
   configDir: string;
@@ -192,7 +194,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
 
     tool(
       "house_state",
-      "Current state of the entities in the house scope: state, unit, when it last changed (house time) and whether Teobeanie may operate it. Filter by domain, by entity ids, to operable ones, or to those changed in the last N minutes.",
+      "Current state of the entities in the house scope: state, unit, when it last changed (house time) and whether Teobeanie may operate it. Filter by domain, by entity ids, to operable ones, or to those changed in the last N minutes. Also the facts: derived state the heuristics read (a value and since when it holds), each with the entities and facts it reads; timeline with fact=<id> shows its changes.",
       {
         domain: { type: "string", description: "e.g. light, binary_sensor" },
         entities: { type: "array", items: { type: "string" }, description: "entity ids" },
@@ -222,7 +224,23 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
           })
           .filter((r) => within === undefined || (Number.isFinite(r.sinceMs) && r.sinceMs >= now() - within * MINUTE))
           .map(({ sinceMs: _drop, ...r }) => r);
-        return { time_zone: zone(), now: local(now()), count: rows.length, entities: rows, ...(outside.length > 0 ? { outside_scope: outside } : {}) };
+        const facts = (deps.facts?.() ?? []).map((f) => ({
+          id: f.id,
+          title: f.title,
+          value: f.known ? f.value : "unknown",
+          ...(f.unit !== undefined ? { unit: f.unit } : {}),
+          ...(f.since !== null ? { since: local(f.since) } : {}),
+          reads: [...f.watch, ...f.facts.map((x) => `fact:${x}`)],
+          ...(f.readers.length > 0 ? { read_by: f.readers } : {}),
+        }));
+        return {
+          time_zone: zone(),
+          now: local(now()),
+          count: rows.length,
+          entities: rows,
+          ...(facts.length > 0 ? { facts } : {}),
+          ...(outside.length > 0 ? { outside_scope: outside } : {}),
+        };
       },
     ),
 
@@ -422,19 +440,24 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
 
     tool(
       "timeline",
-      "What happened around an entity or a heuristic instance, in time order: changes (what changed, by whom), calls (who called what on it), decisions (why, each action with what became of it), the pause, and config changes. Every row has its event_id or obs_id to cite or chain. For an entity: the instances that watch, read or own it; for an instance: what it watches and owns. At most limit rows; `more` continues.",
+      "What happened around an entity, a heuristic instance or a fact, in time order: changes (what changed, by whom), calls (who called what on it), decisions (why, each action with what became of it), facts (a fact's value changed, why, and its cause), the pause, and config changes. Every row has its event_id or obs_id to cite or chain. For an entity: the instances that watch, read or own it and the facts that read it; for an instance: what it watches and owns and the facts it reads; for a fact: its changes, what it reads and the decisions of the instances that read it. At most limit rows; `more` continues.",
       {
         entity: { type: "string" },
         instance: { type: "string", description: "instance key (heuristic/id) or heuristic id" },
+        fact: { type: "string", description: "fact id (house_state lists them)" },
         ...RANGE,
         limit: { type: "number", description: "default 100, max 1000" },
       },
       async (a) => {
         const entity = str(a, "entity");
         const instance = str(a, "instance");
-        const p = await record.timeline({ ...(entity !== undefined ? { entity } : {}), ...(instance !== undefined ? { instance } : {}) }, rangeOf(a, 100));
+        const fact = str(a, "fact");
+        const p = await record.timeline(
+          { ...(entity !== undefined ? { entity } : {}), ...(instance !== undefined ? { instance } : {}), ...(fact !== undefined ? { fact } : {}) },
+          rangeOf(a, 100),
+        );
         return {
-          ...(entity !== undefined ? { entity, name: name(entity) } : { instance }),
+          ...(entity !== undefined ? { entity, name: name(entity) } : fact !== undefined ? { fact } : { instance }),
           from: local(p.from),
           to: local(p.to),
           rows: p.rows.map(shownRow),
@@ -493,5 +516,5 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
 
 export const INSTRUCTIONS = `Teobeanie, the house's event-sourced assistant agent: the house as it sees it. Only the entities in the house scope (allowlist.json) exist here; everything else in Home Assistant is deliberately outside it. These tools are read-only.
 Start with house_scope and house_state; recent_changes says who changed what (Teobeanie, a person, a system user such as the Supervisor, an automation, the device); decisions shows Teobeanie's reasoning and what became of each action; heuristics and heuristic_source show the logic. Heuristic instances in "shadow" mode decide and journal but never act.
-To explain why something happened, find its row (timeline, decisions, recent_changes) and walk its event_id or cause with chain; signals gives an entity's recorded rows over a range. For what happened around an entity or an instance, timeline merges changes, calls, decisions, the pause and config changes in time order. Cite the event_id or obs_id of the rows an answer rests on. Ranges take from and to as "HH:MM", "YYYY-MM-DD HH:MM" (house time) or ISO; a page that has more says so (more: pass it as cursor).
+To explain why something happened, find its row (timeline, decisions, recent_changes) and walk its event_id or cause with chain; signals gives an entity's recorded rows over a range. For what happened around an entity, an instance or a fact, timeline merges changes, calls, decisions, fact changes, the pause and config changes in time order. Facts are derived state (house_state lists them with value and since). Cite the event_id or obs_id of the rows an answer rests on. Ranges take from and to as "HH:MM", "YYYY-MM-DD HH:MM" (house time) or ISO; a page that has more says so (more: pass it as cursor).
 Times are house-local (whoami and house_state give the zone). Every call you make is journaled (tool_calls).`;

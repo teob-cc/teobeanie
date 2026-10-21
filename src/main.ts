@@ -143,10 +143,14 @@ let bridgeRef: HaBridge | undefined;
 const loadedLibrary = await loadLibrary(config.configDir, haLog);
 let library = loadedLibrary.heuristics;
 let packages: PackageInfo[] = loadedLibrary.packages;
-// The House view (step 9b) follows the instances' cards; it exists only after the host.
+// The facts (derived state, kernel/fact.ts) and the files they come from.
+let factSources = loadedLibrary.factSources;
+// The House view (step 9b) follows the instances' cards and the facts; it exists only after the host.
 let cardsChanged = (): void => {};
+let factsChanged = (): void => {};
 const heuristics = createHeuristicHost({
   library,
+  facts: loadedLibrary.facts,
   instances: loadInstances(config.configDir, haLog),
   actuator,
   liveState: (entityId) => bridgeRef?.liveState(entityId),
@@ -156,6 +160,7 @@ const heuristics = createHeuristicHost({
   log: haLog,
   timeZone,
   onCardChange: () => cardsChanged(),
+  onFactChange: () => factsChanged(),
 });
 const routesFor = (al: Allowlist, watched: string[]): RouteSpec[] => {
   const out: RouteSpec[] = [...al.routes];
@@ -393,9 +398,11 @@ const house = createHouseService({
   publish: (frame) => bus.publish(frame as unknown as StreamFrame),
   listening: () => bus.subscriberCount() > 0,
   cards: () => heuristics.cards(),
+  facts: () => heuristics.facts(),
   log: haLog,
 });
 cardsChanged = () => house.cardsChanged();
+factsChanged = () => house.factsChanged();
 
 // 10. Read API (journal implements JournalReader; ha implements RecorderReader).
 const readApi = createReadApi(
@@ -426,6 +433,7 @@ const reloader = createReloader({
         allowlist = next.allowlist;
         library = next.library;
         packages = next.packages;
+        factSources = next.factSources;
         ({ tiles, groups } = next);
         checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
         house.configure(houseConfig());
@@ -491,6 +499,7 @@ const server = startServer(
     readApi,
     health,
     heuristics: () => heuristics.instances(),
+    facts: () => heuristics.facts(),
     house,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
     studio: { configDir: config.configDir, mode: config.mode, liveStates: () => bridge.liveCache().values(), scope, packages: () => packages },
@@ -499,7 +508,7 @@ const server = startServer(
     pause,
     command: (name, args, from) => heuristics.command(name, args, from),
     log,
-    record: createHouseRecord({ scope, signals: signalStore, journal, users, instances: () => heuristics.instances(), house: houseFacts }),
+    record: createHouseRecord({ scope, signals: signalStore, journal, users, instances: () => heuristics.instances(), facts: () => heuristics.facts(), house: houseFacts }),
     mcp: (app) =>
       mountMcp(app, {
         mode: config.mode,
@@ -514,6 +523,7 @@ const server = startServer(
           ha,
           users,
           instances: () => heuristics.instances(),
+          facts: () => heuristics.facts(),
           pause: () => pause.state(),
           configDir: config.configDir,
           house: houseFacts,

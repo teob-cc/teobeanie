@@ -8,7 +8,7 @@
 import type { HaClient, HaEntityState } from "@lambda-house/teob-ts/ha";
 import { houseZone, localMinutes } from "../kernel/clock.js";
 import { buildLayout, type EnergyHints, type EntityFacts, type GroupsConfig } from "./layout.js";
-import { liveState, type EnergyToday, type HouseFrame, type HouseView, type InstanceCard, type LiveState, type TileSpecView } from "./view.js";
+import { liveState, type EnergyToday, type FactInfo, type HouseFrame, type HouseView, type InstanceCard, type LiveState, type TileSpecView } from "./view.js";
 
 export type { EnergyToday };
 
@@ -19,6 +19,8 @@ export interface HouseService {
   configure(next: HouseConfig): void;
   /** An instance's card may have changed: the next frame carries the cards if any did. */
   cardsChanged(): void;
+  /** A fact changed: the next frame carries the facts. */
+  factsChanged(): void;
   stop(): void;
 }
 
@@ -38,6 +40,8 @@ export interface HouseServiceDeps {
   timeZone?: () => string | undefined;
   /** The instances' cards as they stand now (host.cards()). */
   cards?: () => InstanceCard[];
+  /** The facts as they stand now (host.facts()). */
+  facts?: () => FactInfo[];
   /** Publish a frame to the SSE bus, and whether anyone listens. */
   publish: (frame: HouseFrame) => void;
   listening: () => boolean;
@@ -206,6 +210,7 @@ export function createHouseService(deps: HouseServiceDeps): HouseService {
       tiles,
       entities,
       cards: deps.cards?.() ?? [],
+      facts: deps.facts?.() ?? [],
     };
   };
 
@@ -241,19 +246,24 @@ export function createHouseService(deps: HouseServiceDeps): HouseService {
   // ---- live frames: changed states and cards, coalesced ----
   const pending = new Map<string, LiveState>();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  /** The cards as the last frame sent them: a frame carries them only when they differ. */
+  /** The cards (and the facts) as the last frame sent them: a frame carries them only when they differ. */
   let sentCards: string | undefined;
+  let sentFacts: string | undefined;
   const flush = (): void => {
     timer = undefined;
     // A card may read any entity it declares, so it is looked at on every frame.
     const cards = deps.cards?.();
     const cardsJson = cards === undefined ? undefined : JSON.stringify(cards);
     const cardsMoved = cardsJson !== undefined && cardsJson !== sentCards;
-    if (pending.size === 0 && !cardsMoved) return;
+    const facts = deps.facts?.();
+    const factsJson = facts === undefined ? undefined : JSON.stringify(facts);
+    const factsMoved = factsJson !== undefined && factsJson !== sentFacts;
+    if (pending.size === 0 && !cardsMoved && !factsMoved) return;
     const states = Object.fromEntries(pending);
     pending.clear();
     if (cardsMoved) sentCards = cardsJson;
-    deps.publish({ type: "house", at: now(), states, ...(cardsMoved ? { cards: cards! } : {}) });
+    if (factsMoved) sentFacts = factsJson;
+    deps.publish({ type: "house", at: now(), states, ...(cardsMoved ? { cards: cards! } : {}), ...(factsMoved ? { facts: facts! } : {}) });
   };
   const schedule = (): void => {
     timer ??= setTimeout(flush, deps.frameMs ?? 1000);
@@ -272,6 +282,9 @@ export function createHouseService(deps: HouseServiceDeps): HouseService {
     },
     cardsChanged() {
       if (deps.cards !== undefined && deps.listening()) schedule();
+    },
+    factsChanged() {
+      if (deps.facts !== undefined && deps.listening()) schedule();
     },
     stop() {
       unsubscribe();

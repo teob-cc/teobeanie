@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { HaBridgeStats, HaClientStats } from "@lambda-house/teob-ts/ha";
-import type { InstanceInfo } from "./kernel/host.js";
+import type { FactInfo, InstanceInfo } from "./kernel/host.js";
 import type { DeviceResolver } from "./devices.js";
 import type { HouseService } from "./house/service.js";
 import { mountStudio, type StudioDeps } from "./studio/files.js";
@@ -40,6 +40,8 @@ export interface ServerDeps {
   readApi: { handle: (req: Request) => Promise<Response | undefined> };
   health: () => HealthReport;
   heuristics: () => InstanceInfo[];
+  /** The facts with their values (GET api/facts); also in api/house. */
+  facts?: () => FactInfo[];
   house: HouseService;
   devices: DeviceResolver;
   studio: StudioDeps;
@@ -72,6 +74,9 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
   app.get("/api/heuristics", (c) => c.json({ instances: deps.heuristics(), reload: deps.reload?.last() ?? null }));
 
   app.get("/api/house", async (c) => c.json(await deps.house.view()));
+
+  // The facts: derived state, each with its value and since (its changes: api/timeline?fact=<id>).
+  app.get("/api/facts", (c) => c.json({ facts: deps.facts?.() ?? [] }));
 
   app.get("/api/house/energy-today", async (c) => {
     try {

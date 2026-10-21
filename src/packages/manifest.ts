@@ -76,6 +76,12 @@ export interface Manifest {
   main?: string | string[];
   /** Heuristic id → what the package says about it. */
   heuristics: Record<string, HeuristicManifest>;
+  /** Fact id → what the package says about it (a package may define facts, fact.ts). */
+  facts?: Record<string, FactManifest>;
+}
+
+export interface FactManifest {
+  title?: string;
 }
 
 const KEBAB = /^[a-z0-9][a-z0-9-]*$/;
@@ -153,7 +159,7 @@ function checkRole(path: string, r: unknown, out: string[]): void {
 export function manifestProblems(m: unknown, folder?: string): string[] {
   const out: string[] = [];
   if (!isObject(m)) return ["expected an object"];
-  const known = ["name", "version", "platform", "title", "description", "pattern", "main", "heuristics"];
+  const known = ["name", "version", "platform", "title", "description", "pattern", "main", "heuristics", "facts"];
   for (const k of Object.keys(m)) if (!known.includes(k) && !k.startsWith("$")) out.push(`${k}: unknown, expected one of ${known.join(", ")}`);
   if (typeof m["name"] !== "string" || !KEBAB.test(m["name"])) out.push("name: expected a kebab-case name");
   else if (folder !== undefined && m["name"] !== folder) out.push(`name: "${m["name"]}" is not the folder's name (${folder})`);
@@ -163,8 +169,22 @@ export function manifestProblems(m: unknown, folder?: string): string[] {
   if (m["description"] !== undefined && typeof m["description"] !== "string") out.push("description: expected a string");
   if (m["pattern"] !== undefined && !PATTERNS.includes(m["pattern"] as Pattern)) out.push(`pattern: expected one of ${PATTERNS.join(", ")}`);
   if (m["main"] !== undefined && !strings(m["main"])) out.push("main: expected a file name or a list of them");
+  const fs = m["facts"];
+  if (fs !== undefined) {
+    if (!isObject(fs)) out.push("facts: expected an object with an entry per fact id");
+    else
+      for (const [id, f] of Object.entries(fs)) {
+        if (!KEBAB.test(id)) out.push(`facts.${id}: the id must be kebab-case`);
+        if (!isObject(f)) out.push(`facts.${id}: expected an object { title? }`);
+        else {
+          for (const k of Object.keys(f)) if (k !== "title") out.push(`facts.${id}.${k}: unknown`);
+          if (f["title"] !== undefined && typeof f["title"] !== "string") out.push(`facts.${id}.title: expected a string`);
+        }
+      }
+  }
   const hs = m["heuristics"];
-  if (!isObject(hs) || Object.keys(hs).length === 0) {
+  // A package of facts only may name no heuristics.
+  if (!isObject(hs) || (Object.keys(hs).length === 0 && !(isObject(fs) && Object.keys(fs).length > 0))) {
     out.push("heuristics: expected an object with an entry per heuristic id");
     return out;
   }

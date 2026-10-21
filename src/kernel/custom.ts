@@ -4,7 +4,8 @@
 // reload (a file whose text changed is imported afresh); TypeScript runs
 // through Node's type stripping, so there is no build step. A file imports what it
 // needs from "teobeanie" (resolved here to the add-on's toolkit; "teob", its old name,
-// still works) and default-exports a rule or heuristic definition, or an array of them:
+// still works) and default-exports a rule, a heuristic definition or a fact (fact.ts),
+// or an array of them:
 //
 //   import { rule, keep, minutes } from "teobeanie";
 //   export default rule("hallway-light", ({ ha, held }) => ha.light.hallway.to(...));
@@ -20,6 +21,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as toolkit from "../toolkit.js";
 import type { AnyHeuristic } from "./heuristic.js";
+import { isFact, type AnyFact } from "./fact.js";
 
 /** What a custom heuristic module's default-export function receives: the "teobeanie" module. */
 export const TOOLKIT = toolkit;
@@ -89,6 +91,18 @@ export interface Loaded {
   file: string;
 }
 
+/** A fact and the file that exported it. */
+export interface LoadedFact {
+  fact: AnyFact;
+  file: string;
+}
+
+/** Where loadModules collects the facts: the ids taken so far (added to), and the list. */
+export interface FactSink {
+  taken: Set<string>;
+  out: LoadedFact[];
+}
+
 /**
  * What each file exported, by path and text: an unchanged file gives the same
  * definitions back (the host sees its instances as unchanged), an edited one is
@@ -105,7 +119,7 @@ const digest = (text: string | Buffer): string => createHash("sha256").update(te
  * logged and skipped; with `failures`, its reason is collected too (a reload then
  * rejects the whole config).
  */
-export async function loadModules(modules: SourceModule[], taken: Set<string>, log: Log, failures?: string[]): Promise<Loaded[]> {
+export async function loadModules(modules: SourceModule[], taken: Set<string>, log: Log, failures?: string[], facts?: FactSink): Promise<Loaded[]> {
   resolveToolkit();
   const out: Loaded[] = [];
   for (const m of modules) {
@@ -119,17 +133,32 @@ export async function loadModules(modules: SourceModule[], taken: Set<string>, l
         exported = typeof mod.default === "function" ? (mod.default as (t: Toolkit) => unknown)(TOOLKIT) : mod.default;
         loaded.set(m.file, { hash, exported });
       }
-      const defs = (Array.isArray(exported) ? exported : [exported]).map((d) => validate(d, m.label));
+      const items = Array.isArray(exported) ? exported : [exported];
+      // Facts: collected where the caller takes them, else left alone.
+      const factDefs = items.filter(isFact);
+      const defs = items.filter((d) => !isFact(d)).map((d) => validate(d, m.label));
       const ids = new Set<string>();
       for (const def of defs) {
         if (taken.has(def.id) || ids.has(def.id)) throw new Error(`${m.label}: heuristic id "${def.id}" is already defined`);
         ids.add(def.id);
       }
+      const factIds = new Set<string>();
+      for (const f of factDefs) {
+        if (typeof f.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(f.id)) throw new Error(`${m.label}: fact id must be kebab-case (got ${JSON.stringify(f.id)})`);
+        if (facts?.taken.has(f.id) || factIds.has(f.id)) throw new Error(`${m.label}: fact id "${f.id}" is already defined`);
+        factIds.add(f.id);
+      }
       for (const def of defs) {
         taken.add(def.id);
         out.push({ def, file: m.file });
       }
-      if (!cached) log("info", `heuristics from ${m.label}: ${defs.map((d) => d.id).join(", ")}`);
+      if (facts !== undefined) {
+        for (const f of factDefs) {
+          facts.taken.add(f.id);
+          facts.out.push({ fact: f, file: m.file });
+        }
+      }
+      if (!cached) log("info", `${m.label}: ${[...defs.map((d) => d.id), ...factDefs.map((f) => `fact ${f.id}`)].join(", ")}`);
     } catch (err) {
       const reason = (err as Error).message ?? String(err);
       log(failures === undefined ? "error" : "warn", `skipping ${m.file}: ${reason}`);
