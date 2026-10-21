@@ -111,6 +111,8 @@ function inputLabel(i: InputSummary): string {
       return `a change of ${i.entity ?? "?"}`;
     case "timer":
       return `timer ${i.timer ?? "?"}`;
+    case "fact":
+      return `a change of fact ${i.fact ?? "?"}`;
     case "command":
       return `/${i.command ?? "?"}`;
     case "trigger":

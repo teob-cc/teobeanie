@@ -55,7 +55,7 @@ export type TimelineEntry =
       at: number;
       kind: "decision";
       instance: string;
-      input: { kind: string; entity?: string; value?: unknown; state?: string; timer?: string; trigger?: string };
+      input: { kind: string; entity?: string; value?: unknown; state?: string; timer?: string; trigger?: string; fact?: string };
       why?: string;
       mode?: string;
       failed?: string;
