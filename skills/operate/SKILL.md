@@ -71,7 +71,7 @@ one came home after dark), means wait. Say which path is still unseen.
 5. `heuristics`: the instance shows `mode: active`.
 
 If it still shows `mode: shadow` with `configured_mode: active`, the add-on's
-`shadow_mode` option is on (it is by default) and forces every instance to shadow.
+`shadow_mode` emergency switch is on and forces every instance to shadow.
 Turning it off is the owner's step: the add-on's Configuration tab, then a restart.
 Before they do, list every instance whose `configured_mode` is `active`: they all
 start acting at that moment. Any the owner has not said yes to go back to shadow

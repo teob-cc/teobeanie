@@ -61,7 +61,7 @@ const DEFAULT_OPTIONS: AddonOptions = {
   time_zone: "",
   signal_retention_days: 30,
   mcp_networks: [...DEFAULT_MCP_NETWORKS],
-  shadow_mode: true,
+  shadow_mode: false,
   log_level: "info",
 };
 

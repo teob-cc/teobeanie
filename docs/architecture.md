@@ -62,7 +62,7 @@ Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DI
 
 | Option | Default | Used by |
 |---|---|---|
-| `shadow_mode` | `true` | forces every active instance to shadow |
+| `shadow_mode` | `false` | emergency switch: when on, forces every instance to shadow |
 | `telegram_bot_token`, `telegram_chat_id` | — | the notifier and the command lane |
 | `telegram_alerts_chat_id` | — | copies of notices of instances marked `"alerts": true` |
 | `telegram_commands` | `false` | long-poll the bot for `/commands` (one reader per bot) |

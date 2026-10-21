@@ -33,7 +33,7 @@ options:
     - fe80::/10
     - 100.64.0.0/10
     - fd7a:115c:a1e0::/48
-  shadow_mode: true
+  shadow_mode: false
   log_level: info
 schema:
   llm_provider: list(none|openrouter|ollama)

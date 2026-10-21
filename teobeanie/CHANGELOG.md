@@ -23,7 +23,8 @@ house through MCP.
 - **Journal and causation chains.** Every decision is a journaled event with its
   reason, its actions and the chain back to the sensor change that started it. Timers
   survive restarts.
-- **Shadow mode.** Instances (and, by default, the whole add-on) decide and journal
+- **Shadow mode.** Each behaviour starts in shadow by its own `mode`, and `shadow_mode` is an
+  emergency switch, off by default, that forces every instance to shadow. Shadow instances decide and journal
   what they would do without acting. The panel shows how often your existing
   automations made the same call.
 - **SafeActuator.** Every service call passes one gate: the house scope, per-entity

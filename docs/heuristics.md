@@ -687,8 +687,8 @@ The kernel also guarantees:
 | `shadow` | yes | yes | vetted, journaled as `ActionSuppressed`, never sent (nor resent) |
 | `active` | yes | yes | vetted, `ActionRequested`, executed, `ActionCompleted`; a notice a restart cut off is resent once |
 
-The add-on option `shadow_mode: true` (the default, and always on in standalone mode)
-forces every active instance to shadow.
+The add-on option `shadow_mode: true` (an emergency switch, off by default; always on in
+standalone mode) forces every active instance to shadow.
 
 `vet()` runs inside the decision, so the verdict is journaled. It enforces:
 

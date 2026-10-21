@@ -110,7 +110,7 @@ agent that reads instructions can follow them.
 | MCP refused: `forbidden: client … is not in the allowed networks` | Your machine's address is outside the add-on's `mcp_networks` option (default: the private LAN ranges and Tailscale). Add your network there and restart the add-on |
 | Home Assistant rejected the token | Make a new long-lived token and save it to the file again |
 | A reload was rejected after a push | The add-on keeps the previous config. The reason is in the add-on's log (Settings → Add-ons → Teobeanie → Log) and on the panel's Heuristics tab. Fix the file, commit, push again |
-| An instance stays in shadow after "active" | The add-on's `shadow_mode` option is on (the default). Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
+| An instance stays in shadow after "active" | Someone turned the add-on's `shadow_mode` emergency switch on. Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
 
 Teobeanie is alpha (0.2). The MCP tools are read-only today. MCP tools to explore Home
 Assistant, and to develop and operate behaviours, are on the

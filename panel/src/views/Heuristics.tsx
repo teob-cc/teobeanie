@@ -315,7 +315,7 @@ function ModeChip({ i }: { i: HeuristicInstance }) {
   const forced = i.configuredMode === "active" && i.mode === "shadow";
   const cls = i.mode === "active" ? "chip chip-ok" : i.mode === "shadow" ? "chip chip-on" : "chip chip-off";
   return (
-    <span className={cls} title={forced ? "configured active, but the global shadow_mode option is on" : `mode: ${i.mode}`}>
+    <span className={cls} title={forced ? "configured active, but the shadow_mode emergency switch is on" : `mode: ${i.mode}`}>
       {i.mode}
       {forced ? " (global)" : ""}
     </span>

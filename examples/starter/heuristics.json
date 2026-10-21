@@ -1,5 +1,5 @@
 {
-  "_readme": "A starter house. Replace the entity ids with yours (Developer tools → States) and delete the instances you don't need. Everything starts in shadow: decisions are journaled, nothing is actuated. Set \"mode\": \"active\" per instance when its decisions look right, and turn the add-on's shadow_mode option off.",
+  "_readme": "A starter house. Replace the entity ids with yours (Developer tools → States) and delete the instances you don't need. Everything starts in shadow: decisions are journaled, nothing is actuated. Set \"mode\": \"active\" per instance when its decisions look right.",
   "instances": [
     { "heuristic": "night-light", "id": "hallway", "mode": "shadow", "params": {} },
 

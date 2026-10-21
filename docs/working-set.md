@@ -120,9 +120,8 @@ done and why. If an old automation still runs, the card shows both side by side,
 with a green tick when they agree. When the decisions look right, change `"shadow"`
 to `"active"`. If it ever misbehaves, change it back. Nothing else is needed.
 
-The add-on also has a `shadow_mode` option that forces everything into shadow. While
-it is on, `"active"` in the file has no effect. Switch it off when you want your
-active instances to act.
+The add-on also has a `shadow_mode` option, an emergency switch that forces everything
+into shadow. It is off by default. While it is on, `"active"` in the file has no effect.
 
 ## Notices
 

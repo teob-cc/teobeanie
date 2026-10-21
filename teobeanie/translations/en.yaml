@@ -46,7 +46,7 @@ configuration:
     description: Networks (CIDR, e.g. 192.168.0.0/16) your AI agent may use the MCP tools from, through Home Assistant ingress. The default is the private LAN ranges and Tailscale; a public address is always refused unless you add it. Empty closes MCP.
   shadow_mode:
     name: Shadow mode
-    description: When on, heuristics decide and journal but never actuate. Recommended for new installs.
+    description: Emergency switch. When on, every instance is forced to shadow: it decides and journals but never actuates. Off by default; each instance's own mode decides.
   log_level:
     name: Log level
     description: Verbosity of the add-on log.

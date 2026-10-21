@@ -31,8 +31,7 @@ README for the people of the house and a sample rule with its test. Their guide 
 
 To start: run `init` into a new folder, or copy a starter's files up into the config folder, replace the entity ids
 with yours (Developer tools → States) and delete what you don't need. The add-on
-picks the files up as they are saved. Everything runs in **shadow** until you set `"mode": "active"` on an instance
-and turn off the add-on's `shadow_mode` option.
+picks the files up as they are saved. Everything runs in **shadow** until you set `"mode": "active"` on an instance.
 
 Keep your real configuration in your own (private) place, for example a private git
 repository that you copy into the config folder. Your entity ids, names and routines

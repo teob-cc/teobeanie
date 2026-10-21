@@ -51,8 +51,8 @@ yes. By hand:
    both made the same call.
 4. The **Heuristics** tab shows every instance with its mode, last decision, 24-hour
    activity, agreement count and pending timers.
-5. When an instance has earned your trust, set `"mode": "active"` on it, turn the
-   `shadow_mode` option off, and disable your old automation for those entities.
+5. When an instance has earned your trust, set `"mode": "active"` on it
+   and disable your old automation for those entities.
 
 How to edit the config folder, for the people of the house, is in
 [docs/working-set.md](https://github.com/teob-cc/teobeanie/blob/main/docs/working-set.md).
@@ -112,7 +112,7 @@ claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 \
 | `time_zone` | The house's time zone (e.g. `America/New_York`) for time-of-day rules, the daily summary and local times; empty (the default) uses Home Assistant's |
 | `signal_retention_days` | Raw-signal ring retention (decisions are kept forever) |
 | `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
-| `shadow_mode` | Global dry-run: journal decisions, never actuate (default on) |
+| `shadow_mode` | Emergency switch: forces every instance to shadow, so nothing actuates (default off) |
 | `log_level` | Add-on log verbosity |
 
 ## Self-monitoring

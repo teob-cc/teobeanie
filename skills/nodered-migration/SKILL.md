@@ -75,8 +75,8 @@ from `last_changed` (`heldSince`), not from boot.
 Add the instance to `heuristics.json` with `"mode": "shadow"`; add its entities to
 `allowlist.json` (`"operate": true` only for what it actuates). Push it (`$SYNC push
 $WC`, after specs and a commit, as in the `develop` skill). The add-on
-option `shadow_mode` (default true) forces every instance to shadow regardless of the
-file — it must be off before any instance can go active.
+option `shadow_mode` (an emergency switch, default false) forces every instance to shadow
+regardless of the file; if it is on, the owner turns it off before an instance can act.
 
 Shadow journals `ActionSuppressed` rows: what Teobeanie would have done. Unit-test new
 parameters with `simulate()` first (made-up entity names).
@@ -104,8 +104,8 @@ cd $TB && HA_URL=... HA_TOKEN="$(cat ~/.config/teobeanie/ha-token)" \
    `node $NR/nodered.mjs disable <id>...` (backs the flows up, deploys only those
    nodes, reads them back). Same seconds:
 3. Set the instance `"mode": "active"` in the working copy's `heuristics.json`, commit,
-   `$SYNC push $WC` (the `operate` skill: one mode per push, the `shadow_mode` option
-   off).
+   `$SYNC push $WC` (the `operate` skill: one mode per push, the `shadow_mode` switch
+   must be off).
 4. Start a watcher and keep it running for at least a day:
    `node $NR/cutover-watch.mjs <heuristic>/<id> <entities...> >> cutover.log`
    It prints Teobeanie's decisions and calls, state changes with who made them (Teobeanie, a
