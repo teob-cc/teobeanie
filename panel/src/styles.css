@@ -1608,3 +1608,51 @@ pre {
   gap: 0.25rem;
   margin: 0.7rem 0 0.2rem;
 }
+
+/* ---- connect ---- */
+.connect-minted p {
+  margin: 0.2rem 0 0.5rem;
+}
+.connect-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.4rem 0;
+}
+.connect-host input {
+  max-width: 26rem;
+}
+.connect-paste {
+  margin: 0.5rem 0;
+}
+.connect-paste-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.connect-paste pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.connect-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.connect-table th,
+.connect-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--grid);
+}
+.connect-table th {
+  color: var(--muted);
+  font-weight: 500;
+}

@@ -12,6 +12,7 @@ import { createMcp, currentCaller } from "../src/mcp/index.js";
 import type { ToolCalled } from "../src/mcp/journal.js";
 import { mountConnect, supervisorPort, type ConnectInfo } from "../src/connect.js";
 import { agentApp } from "../src/server.js";
+import { claudeLine, jsonSnippet, mcpUrl } from "../panel/src/connectLines.js";
 
 const LAN = ["192.168.0.0/16", "100.64.0.0/10"];
 const INGRESS = "172.30.32.2";
@@ -33,7 +34,7 @@ describe("agent tokens", () => {
 
     const path = join(dir, "agent-tokens.json");
     const file = readFileSync(path, "utf8");
-    const secret = token.split("_").slice(2).join("_");
+    const secret = token.slice("tbn_".length + 13);
     expect(file).not.toContain(secret);
     expect(file).not.toContain(token);
     const stored = (JSON.parse(file) as { tokens: Array<Record<string, string>> }).tokens[0]!;
@@ -244,7 +245,7 @@ describe("the Connect API", () => {
 
     const listed = (await (await req("GET", "/api/connect", INGRESS)).json()) as ConnectInfo;
     expect(listed).toMatchObject({ port: 8199, defaultPort: 8199, source: "supervisor", tokens: [{ id: info.id, name: "Claude Code on my laptop", by: "person:alex" }] });
-    expect(JSON.stringify(listed)).not.toContain(token.split("_")[2]!);
+    expect(JSON.stringify(listed)).not.toContain(token.slice("tbn_".length + 13));
 
     expect((await req("DELETE", `/api/agent-tokens/${info.id}`, INGRESS, undefined, { "x-remote-user-name": "sam" })).status).toBe(200);
     expect(tokens.verify(token)).toBeUndefined();
@@ -296,5 +297,17 @@ describe("the agent port's host port", () => {
     }) as unknown as typeof fetch;
     expect(await supervisorPort({ token: "t", fetch: failing })()).toEqual({ port: 8199, source: "default" });
     expect(await supervisorPort({ token: "t", fetch: answer({}, 403) })()).toEqual({ port: 8199, source: "default" });
+  });
+});
+
+describe("the lines the Connect page shows", () => {
+
+  it("point Claude Code and other clients at the agent port with the token", () => {
+    const url = mcpUrl("homeassistant.local", 8199);
+    expect(url).toBe("http://homeassistant.local:8199/mcp");
+    expect(claudeLine(url, "tbn_x")).toBe('claude mcp add --transport http teobeanie http://homeassistant.local:8199/mcp --header "Authorization: Bearer tbn_x"');
+    expect(JSON.parse(jsonSnippet(url, "tbn_x"))).toEqual({ mcpServers: { teobeanie: { type: "http", url, headers: { Authorization: "Bearer tbn_x" } } } });
+    expect(mcpUrl("fd7a:115c:a1e0::1", 18199)).toBe("http://[fd7a:115c:a1e0::1]:18199/mcp");
+    expect(mcpUrl("[fd7a:115c:a1e0::1]", 8199)).toBe("http://[fd7a:115c:a1e0::1]:8199/mcp");
   });
 });
