@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type AgentToken, type ConnectInfo } from "../api";
+import { api, type AgentToken, type ConnectInfo, type MoveExported, type MoveInfo } from "../api";
 import { claudeLine, jsonSnippet, mcpUrl } from "../connectLines";
-import { fmtDay, fmtTime } from "../format";
+import { fmtBytes, fmtDay, fmtTime } from "../format";
 import { originLabel } from "../origin";
 
 const when = (at: number | null): string => (at === null ? "never" : `${fmtDay(at)} ${fmtTime(at)}`);
@@ -30,6 +30,107 @@ function Paste({ label, text }: { label: string; text: string }) {
       </div>
       <pre>{text}</pre>
     </div>
+  );
+}
+
+/** What the start found in teobeanie-move/ worth showing: an import, or why one did not happen. */
+const SHOWN_AT_START = new Set(["imported", "not-empty", "refused", "failed"]);
+
+/**
+ * Move this install to another (the store add-on, a new Home Assistant): an export of its
+ * history and config folder, which the other install takes in at its first start
+ * (src/move.ts, docs/moving.md). A person's action here, never an agent's.
+ */
+function MoveInstall() {
+  const [info, setInfo] = useState<MoveInfo | null>(null);
+  const [signals, setSignals] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<MoveExported | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api
+      .move()
+      .then((i) => setInfo(i))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+  useEffect(load, [load]);
+
+  const run = () => {
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    api
+      .exportInstall(signals)
+      .then((d) => {
+        setDone(d);
+        load();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const atStart = info?.atStart;
+  return (
+    <>
+      <div className="view-head">
+        <h2>Move this install</h2>
+      </div>
+      <p className="muted small">
+        Moving to the store add-on or a new Home Assistant? Export this install's history (the journal, the revisions, the agent tokens) and its config folder; the new
+        install takes the export in at its first start. docs/moving.md has the steps.
+      </p>
+      {error && <p className="bad-text">{error}</p>}
+      {atStart && SHOWN_AT_START.has(atStart.status) && <p className={atStart.status === "imported" ? "muted small" : "banner"}>{atStart.message}</p>}
+      {info?.lastImport && (
+        <p className="muted small">
+          This install's history came from {info.lastImport.folder}, exported {when(info.lastImport.createdAt)} by Teobeanie {info.lastImport.version} (
+          {info.lastImport.events} events).
+        </p>
+      )}
+      <div className="toolbar">
+        <label className="move-signals">
+          <input type="checkbox" checked={signals} onChange={(e) => setSignals(e.target.checked)} disabled={busy} /> include the signals (the recorded
+          states; larger)
+        </label>
+        <button className="tab active" onClick={run} disabled={busy}>
+          {busy ? "Exporting…" : "Export"}
+        </button>
+      </div>
+      {done && (
+        <p className="banner">
+          Written to <code>{done.folder}</code> in this add-on's config folder ({done.manifest.journal.events} events). Next: stop this add-on, copy that folder into
+          the new add-on's config folder under <code>{info?.folder ?? "teobeanie-move"}/</code> (addon_configs/&lt;its slug&gt; over Samba or SSH), set its options,
+          and start it.
+        </p>
+      )}
+      {info && info.exports.length > 0 && (
+        <table className="connect-table">
+          <thead>
+            <tr>
+              <th>Export</th>
+              <th>Events</th>
+              <th>Signals</th>
+              <th>Size</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {info.exports.map((x) => (
+              <tr key={`${x.name}${x.imported ? ".imported" : ""}`}>
+                <td className="tnum" title={x.by !== undefined ? `by ${originLabel(x.by)}` : undefined}>
+                  {x.createdAt !== undefined ? when(x.createdAt) : x.name}
+                </td>
+                <td className="tnum">{x.events ?? "–"}</td>
+                <td>{x.signals === undefined ? "–" : x.signals ? "yes" : "no"}</td>
+                <td className="tnum">{x.bytes !== undefined ? fmtBytes(x.bytes) : "–"}</td>
+                <td className="muted small">{x.imported ? "imported here" : x.createdAt === undefined ? "incomplete" : `${info.folder}/${x.name}`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 
@@ -187,6 +288,8 @@ export function Connect() {
         Without the agent port, an agent can still connect through Home Assistant ingress with the stdio bridge, scripts/teobeanie-mcp-bridge.mjs, and a
         long-lived token of a Home Assistant admin. docs/getting-started.md has the steps.
       </p>
+
+      <MoveInstall />
     </section>
   );
 }

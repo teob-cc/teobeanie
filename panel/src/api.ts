@@ -274,6 +274,35 @@ export interface ConnectInfo {
   tokens: AgentToken[];
 }
 
+/** An export in teobeanie-move/ (src/move.ts ExportInfo); no details: its manifest is not there (yet). */
+export interface MoveExport {
+  name: string;
+  imported: boolean;
+  createdAt?: number;
+  version?: string;
+  by?: string;
+  events?: number;
+  signals?: boolean;
+  files?: number;
+  bytes?: number;
+}
+
+/** GET api/move (src/move.ts MoveInfo): the exports, what this start found, the last import. */
+export interface MoveInfo {
+  folder: string;
+  exports: MoveExport[];
+  atStart: { status: "none" | "own" | "not-empty" | "refused" | "failed" | "imported"; message: string; folders: string[]; at: number } | null;
+  lastImport: { at: number; folder: string; version: string; createdAt: number; events: number } | null;
+}
+
+/** POST api/move/export's answer. */
+export interface MoveExported {
+  name: string;
+  /** teobeanie-move/<name>, in the add-on's config folder. */
+  folder: string;
+  manifest: { createdAt: number; journal: { events: number }; signals: boolean; files: Array<{ path: string; bytes: number }> };
+}
+
 /** A write that answers with an outcome (200, or 422: rejected); anything else throws. */
 async function edit(url: string, method: string, body?: unknown): Promise<EditOutcome> {
   const res = await fetch(url, {
@@ -416,6 +445,15 @@ export const api = {
       const body = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
       throw new Error(body.reason ?? body.error ?? `HTTP ${res.status}`);
     }
+  },
+  /** The exports of this install and what the start imported (ingress only). */
+  move: () => getJson<MoveInfo>("api/move"),
+  /** Write an export of this install into its config folder's teobeanie-move/. */
+  exportInstall: async (signals: boolean): Promise<MoveExported> => {
+    const res = await fetch("api/move/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signals }) });
+    const body = (await res.json().catch(() => ({}))) as Partial<MoveExported> & { reason?: string; error?: string };
+    if (!res.ok || body.name === undefined) throw new Error(body.reason ?? body.error ?? `HTTP ${res.status}`);
+    return body as MoveExported;
   },
   deviceEntities: (ids: string[]) =>
     getJson<{ devices: Record<string, string[]> }>(`api/device-entities?ids=${ids.map(encodeURIComponent).join(",")}`),

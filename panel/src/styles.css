@@ -1645,6 +1645,12 @@ pre {
   overflow-wrap: anywhere;
   font-size: 0.85rem;
 }
+.move-signals {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
 .connect-table {
   width: 100%;
   border-collapse: collapse;
