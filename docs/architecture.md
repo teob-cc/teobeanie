@@ -31,14 +31,15 @@ real house: entity ids, people, chats and routines live in each house's config f
                               projections (views.db) · read API · SSE
                                                  │
                      panel (House · Decisions · Heuristics · Studio · Calls)
-                     MCP tools (read-only, LAN or tailnet through ingress) · monitor · agent
+                     MCP tools (read-only, LAN or tailnet: agent port or ingress) · monitor · agent
 ```
 
 Everything is wired in `src/main.ts`, in numbered steps: config and allowlist; HA
 client, notifier, SafeActuator and heuristic host; the stream bus; the sqlite runtime
 and audit aggregates; the monitor; the signal store; projections; the call_service
 audit; the bridge and attribute signals; Telegram commands; the House service; the read
-API; the reloader; the HTTP server with the MCP endpoint. SIGTERM stops them in reverse.
+API; the reloader; the HTTP server with the MCP endpoint, and the agent port. SIGTERM
+stops them in reverse.
 
 ## 1. Setup
 
@@ -46,13 +47,16 @@ API; the reloader; the HTTP server with the MCP endpoint. SIGTERM stops them in 
 
 The add-on (packaging in `teobeanie/`, slug `teobeanie`) talks to HA over
 `ws://supervisor/core/websocket` with the Supervisor token, and is reached through HA
-ingress on port 8099: the panel, the read API and the MCP endpoint all sit behind it. It
-declares `homeassistant_api`, `hassio_api` and `ingress`; it never calls the Supervisor
-REST API itself, only the deploy scripts do. Two folders matter:
+ingress on port 8099: the panel, the read API and the MCP endpoint all sit behind it.
+A second port, 8199 (`ports` in `config.yaml`, the agent port), serves the same MCP
+endpoint and nothing else, to agents with a token (section 5). It declares
+`homeassistant_api`, `hassio_api` and `ingress`; of the Supervisor REST API it reads
+only `addons/self/info`, for the agent port's host port; the deploy scripts do the
+rest. Two folders matter:
 
 | Folder | Holds | In HA backups |
 |---|---|---|
-| `/data` | `journal.db`, `signals.db`, `views.db`, `options.json` | yes, except `signals.db` |
+| `/data` | `journal.db`, `signals.db`, `views.db`, `options.json`, `agent-tokens.json` (names and salted hashes) | yes, except `signals.db` |
 | `/config` (`addon_configs/<slug>`) | `heuristics.json`, `allowlist.json`, `tiles.json`, `heuristics/*.ts` — the working set | yes |
 
 Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DIR`
@@ -69,7 +73,7 @@ Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DI
 | `monitor_alerts`, `monitor_ha_down_min`, `monitor_summary_time` | `true`, 5, off | self-monitoring |
 | `time_zone` | HA's | the house's zone: rules' `between`, replay, the House view's "today", the MCP tools, the monitor |
 | `signal_retention_days` | 30 | the signal store sweep |
-| `mcp_networks` | the private LAN ranges and Tailscale | the networks an MCP client may come from, through ingress; `MCP_NETWORKS` (comma-separated) overrides it |
+| `mcp_networks` | the private LAN ranges and Tailscale | the networks an MCP client may come from, on the agent port or through ingress; `MCP_NETWORKS` (comma-separated) overrides it |
 | `log_level` | `info` | |
 | `llm_provider`, `openrouter_api_key`, `openrouter_model`, `ollama_url`, `llm_monthly_budget_usd` | `none`, —, a default model, —, 10 | declared for the agent; nothing reads them yet (section 7) |
 
@@ -134,8 +138,10 @@ bookkeeping) and `UnwatchedRead`; the packages' heuristics add their own domain 
 by }`; the MCP stream `ToolCalled { tool, args, caller, ok, ms }`; `teob-control/pause`
 the global pause, `Paused { at, by, reason? }` and `Resumed { at, by }`, folded at boot;
 `teob-config/working-set` the working set's edits, `ConfigChanged { at, file, by, summary,
-instances? }` (section 6, item 3); `teob-fact/<id>` one stream per fact (correlation
-`fact/<id>`).
+instances? }` (section 6, item 3); `teob-access/agent-tokens` the agent tokens,
+`AgentTokenMinted { at, id, name, by }` and `AgentTokenRevoked { at, id, by }` (the
+hashes are in `/data/agent-tokens.json`, never in the journal); `teob-fact/<id>` one
+stream per fact (correlation `fact/<id>`).
 
 What the host writes, per fact:
 
@@ -149,7 +155,8 @@ What the host writes, per fact:
 What is persisted per instance is the heuristic's own state, its timers, and its
 pending actions (rules: the desired value per entity, when it was last sent, which a
 user overrode, the condition tracking). What lives only in memory: rate-limit windows,
-the registry of the add-on's own outgoing calls, the HA user list, the registry caches.
+the registry of the add-on's own outgoing calls, the HA user list, the registry caches,
+when each agent token was last used, the failed attempts per address on the agent port.
 
 ### Recovery
 
@@ -334,25 +341,54 @@ this.
 
 | Integration | Direction | Used for |
 |---|---|---|
-| **HA websocket** | both | `state_changed` and `call_service` events; triggers (`subscribe_trigger`); `callService`; `get_states` snapshots on every (re)connect; `config/auth/list`; the entity, device and area registries; `get_config` (time zone); recorder history and statistics |
+| **HA websocket** | both | `state_changed` and `call_service` events; triggers (`subscribe_trigger`); `callService`; `get_states` snapshots on every (re)connect; `config/auth/list`; the entity, device and area registries and their update events; `homeassistant/expose_entity/list` and `get_services` (the explore tools); `get_config` (time zone); recorder history and statistics |
 | **HA REST** (`/api/template`) | out | resolving a device id to its entities |
 | **HA ingress** | in | the panel, the read API and `/mcp`; the Studio and reload writes accept only the ingress peer |
-| **Supervisor API** | out, scripts only | deploy, options, restart (the add-on itself never calls it) |
+| **Supervisor API** | out | the add-on reads `addons/self/info` (the agent port's host port, for the Connect page); the scripts deploy, set options, restart |
 | **Telegram Bot API** | out | `sendMessage` to the main and alerts chats; with the command lane, `setMyCommands` (the menu, scoped to the main chat), keyboards, `answerCallbackQuery`, `editMessageText` |
 | **Telegram Bot API** | in | `getUpdates` long poll for `/commands` and button presses from the main chat only; stale commands are refused, a second reader (409) is waited out |
-| **LAN, Tailscale** | in | the networks (`mcp_networks`) an MCP client may call the endpoint from, through ingress |
+| **Agent port** (8199) | in | `/mcp` only, `Authorization: Bearer <agent token>`; every other path is a 404 |
+| **LAN, Tailscale** | in | the networks (`mcp_networks`) an MCP client may call the endpoint from, on the agent port or through ingress |
 | **GHCR** | out, CI | the add-on images on a version tag, once published |
 
-The surfaces, all behind ingress:
+The surfaces, all behind ingress but MCP, which also has the agent port:
 
 | Surface | What it offers |
 |---|---|
-| **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it); in the header, the global pause with who paused and when |
-| **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
-| **MCP** (`/mcp`) | read-only tools: `house_scope`, `house_state` (with the facts), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`; every call journaled with its caller; a stdio bridge script connects a desktop client through HA's ingress session, from the LAN or the tailnet |
+| **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it), Connect (mint, list and revoke agent tokens, with the line to paste); in the header, the global pause with who paused and when |
+| **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/connect` and `api/agent-tokens` (ingress only), `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
+| **MCP** (`/mcp`) | read-only tools. The house scope: `house_scope`, `house_state` (with the instances' cards and the facts), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`. All of HA, never recorded (only the call): `ha_registry` (areas, devices, entities; filters and pages), `ha_states`, `ha_history` (at most 7 days, 2000 points a page), `ha_services`, `suggest` (packages whose roles the registry fills, pre-bound). Every call journaled with its caller (`agent:<token name>` on the agent port, the HA user through ingress); a desktop client connects to the agent port with a token (`claude mcp add --transport http …`), or, as a fallback, through HA's ingress session with the stdio bridge script, from the LAN or the tailnet |
 | **Telegram** | notices, command replies, the monitor's alerts and the daily summary; `/commands` |
 | **CLI** (`dist/studio/cli.js`) | `init` (a starter working set with the starter packages), `types` (generate the house typings) and `replay`; both read the folder's packages, and the starter ones it does not have yet |
 | **Monitor** | posts to the chat when HA has been unreachable, an action was refused or failed, a heuristic threw, a system user switched an entity an active instance controls, or someone paused or resumed the heuristics; one message per problem until it clears, at most six an hour; an optional daily summary |
+
+### Who may reach the MCP tools
+
+One MCP server (`src/mcp/index.ts`), two doors, each with its access check in
+`src/mcp/access.ts`. The tools are the same and read-only behind both, and every call
+is journaled with its caller.
+
+- **Ingress** (port 8099): the request comes from the Supervisor's ingress gateway, so
+  Home Assistant has authenticated an admin's session; the client's address (the last
+  `X-Forwarded-For` hop outside the Supervisor's network) must be in `mcp_networks`.
+  Standalone, loopback only. The stdio bridge uses this door.
+- **The agent port** (8199): its own server (`agentApp` in `src/server.ts`) mounts
+  `/mcp` and a 404 for everything else, so the panel, the read API and every write stay
+  behind ingress. The connection's peer must be in `mcp_networks` (no forwarded header
+  is read), must not be over its failed attempts (20 in ten minutes per address, then
+  429), and must send `Authorization: Bearer <agent token>`. A token is
+  `tbn_<id>_<secret>`, 32 random bytes; `/data/agent-tokens.json` keeps per token a
+  random salt and `sha256(salt ‖ secret)`, compared in constant time (an unknown id is
+  compared against a decoy, so it takes as long). Revoking removes the record at once.
+  The caller is `{ via: "agent", agent: <name>, tokenId, address }`, shown as
+  `agent:<name>`.
+- **Minting and revoking** (`POST api/agent-tokens`, `DELETE api/agent-tokens/:id`) and
+  the list (`GET api/connect`) accept only the ingress peer, like every other write:
+  an agent can never mint itself a token. Each mint and revocation is journaled with the
+  HA user who did it.
+- The agent port is plain HTTP. On the tailnet WireGuard encrypts it; on the LAN the
+  token is in the clear, as the LAN's own HA traffic usually is. The owner can move or
+  close the port in the add-on's Network section.
 
 ## 6. Scaffolding and the working set
 
@@ -449,8 +485,8 @@ One historical exception stays:
 
 The add-on declares the agent's options (`llm_provider`: none, OpenRouter or Ollama;
 model, key, URL, a monthly budget) but nothing reads them. What it does have is the
-agent's view of the house: the MCP tools, all read-only, scope-limited, journaled with
-their caller, and the design decision behind them, that a model reads the same record a
+agent's view of the house: the MCP tools, all read-only, journaled with their caller,
+scope-limited except the explore tools, which read all of HA and record none of it, and the design decision behind them, that a model reads the same record a
 person does and nothing more. The framework it builds on (teob-ts `ai`) ships the
 pieces: an `LLMService` with OpenRouter and OpenAI-compatible factories (`chatWithTools`,
 tracked variants for cost), a spend guard, a tool registry over the same `MCPTool` type
@@ -548,9 +584,10 @@ src/
     simulate.ts      the simulator used by tests and the Studio worker
     custom.ts        importing a house's files and packages ("teobeanie" alias)
     clock.ts         local-time helpers
-  packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts
+  packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts, suggest.ts (roles matched to the registry)
   house/             the House view: layout, summary, live service
-  mcp/               tools, timeline (chain, signals, timeline), access (ingress peer + allowed networks), the mcp-audit stream
+  mcp/               tools, ha-tools (explore all of HA), timeline (chain, signals, timeline), access (ingress peer, agent token, allowed networks), agents (agent tokens, teob-access stream), the mcp-audit stream
+  ha-registry.ts     HA's area, device and entity registries for the explore tools, refreshed on registry events
   studio/            cli (types, replay), house typings, file API
   audit.ts           the ha-audit aggregate; attribution.ts: who made each call
   projections.ts     the call timeline view
@@ -559,7 +596,8 @@ src/
   reload.ts          file watch, POST api/reload, apply all-or-nothing, the panel's edits
   working-set.ts     the teob-config stream (ConfigChanged), in-place heuristics.json edits, api/instances/…/mode
   replay.ts          replay and parity
-  server.ts          HTTP routes, SSE, static panel, MCP mount
+  server.ts          HTTP routes, SSE, static panel, MCP mount; the agent port's app (/mcp only)
+  connect.ts         the Connect page's API: agent tokens, the agent port's host port
 panel/src/           views/ (House, Decisions, Heuristics, Studio, Today=Calls), studio/ (Monaco, test worker)
 teobeanie/          add-on packaging: config.yaml, Dockerfile, DOCS.md, translations
 packages/            the starter packages (one folder each: teobeanie.json, code, specs, README, example.json)

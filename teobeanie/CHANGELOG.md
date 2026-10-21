@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Explore Home Assistant over MCP.** New read-only tools read all of Home Assistant
+  through Teobeanie, outside the house scope too: `ha_registry` (areas, devices,
+  entities), `ha_states`, `ha_history` (at most 7 days a call) and `ha_services`.
+  Nothing they read is recorded, only the call. Home Assistant's own MCP server is not
+  needed. `suggest` names the behaviour packages whose roles your entities fill, with
+  the instance's entities bound, the same area's first. `house_state` also returns the
+  instances' cards. The onboard skill uses these tools instead of Home Assistant's REST
+  API.
+- **Connect an agent from the panel.** The add-on opens an agent port (8199) that
+  serves the MCP tools and nothing else. Mint a token for each agent on the panel's new
+  **Connect** page, paste the `claude mcp add --transport http …` line it shows, and
+  revoke the token when the agent should stop. Tokens are kept as salted hashes, and
+  minting, revoking and every tool call are journaled with the token's name. No Home
+  Assistant token or bridge is needed to connect any more; the bridge through ingress
+  stays as the fallback. The port can be moved or closed in the add-on's Network
+  section.
+- **The agent port refuses a hidden client.** When the host's port mapping shows every
+  client as the Supervisor network's gateway (172.30.32.1, inside the default
+  172.16.0.0/12), the agent port refuses it with a 403 that says why, and logs it once.
+  Use the bridge through ingress, or list `172.30.32.0/23` in `mcp_networks` on purpose.
 - **Facts: derived state.** `fact(id, ({ ha, held, within, between, sun, outdoor }) => value)`
   says once what several behaviours need ("nobody near the garage for 5 minutes"), with a
   value and a since. Facts live in packages and in `heuristics/*.ts`, may read other facts

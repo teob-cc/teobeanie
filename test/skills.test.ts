@@ -15,8 +15,10 @@ function frontmatter(text: string): Record<string, string> {
   return Object.fromEntries(m[1]!.split("\n").map((l) => /^([a-z_-]+):\s*(.*)$/.exec(l)).filter((x) => x !== null).map((x) => [x[1]!, x[2]!]));
 }
 
-/** The MCP tools the add-on serves, by name, read from their definitions. */
-const TOOLS = new Set([...readFileSync(join(root, "src", "mcp", "tools.ts"), "utf8").matchAll(/tool\(\s*"([a-z_]+)"/g)].map((m) => m[1]!));
+/** The MCP tools the add-on serves, by name, read from their definitions (the house tools and the explore tools). */
+const TOOLS = new Set(
+  ["tools.ts", "ha-tools.ts"].flatMap((f) => [...readFileSync(join(root, "src", "mcp", f), "utf8").matchAll(/tool\(\s*"([a-z_]+)"/g)].map((m) => m[1]!)),
+);
 
 describe("skills", () => {
   it("are the five, each a SKILL.md whose name is its folder and whose description says when to use it", () => {
@@ -30,7 +32,8 @@ describe("skills", () => {
   });
 
   it("name only MCP tools the add-on has", () => {
-    expect(TOOLS.size).toBeGreaterThanOrEqual(13);
+    expect(TOOLS.size).toBeGreaterThanOrEqual(18);
+    for (const t of ["ha_registry", "ha_states", "ha_history", "ha_services", "suggest"]) expect(TOOLS.has(t), t).toBe(true);
     const explain = readFileSync(join(root, "skills", "explain", "SKILL.md"), "utf8");
     const listed = [...explain.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]!);
     expect(listed.length).toBeGreaterThan(5);
@@ -40,6 +43,12 @@ describe("skills", () => {
       const text = readFileSync(join(root, "skills", name, "SKILL.md"), "utf8");
       for (const m of text.matchAll(/`([a-z_]+)` with /g)) expect(TOOLS.has(m[1]!), `${name}: ${m[1]}`).toBe(true);
     }
+  });
+
+  it("onboard explores through the MCP tools, not Home Assistant's REST API", () => {
+    const text = readFileSync(join(root, "skills", "onboard", "SKILL.md"), "utf8");
+    for (const t of ["ha_registry", "ha_states", "suggest"]) expect(text).toContain(`\`${t}\``);
+    expect(text).not.toMatch(/\/api\/(states|template|config)|curl /);
   });
 
   it("point at scripts that exist", () => {
