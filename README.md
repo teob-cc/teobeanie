@@ -138,6 +138,13 @@ Assistant builds the image itself. It needs the Terminal & SSH add-on with your 
 version, so the new image is built while the old one still runs;
 [docs/deploy.md](docs/deploy.md) has the downtime of each kind of change.
 
+### Moving a house to another install
+
+A backup restores only into the same slug. To move from a local add-on to the store's,
+or to a new Home Assistant box, export on the panel's Connect page and copy the export
+into the new add-on's config folder before its first start:
+[docs/moving.md](docs/moving.md).
+
 ### Releasing
 
 1. Bump the version in `package.json`, `teobeanie/config.yaml`, `SDK_VERSION` in

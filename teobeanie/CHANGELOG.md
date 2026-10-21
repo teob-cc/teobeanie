@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Move to another install.** Home Assistant restores an add-on's backup only into the
+  same slug; now a house can move from one Teobeanie install to another (the local
+  add-on to the store's, or to a new Home Assistant box) with its history. **Export** on
+  the Connect page writes the journal (a consistent copy taken while running), the
+  revisions, the agent tokens' hashes, the config folder and, when asked, the signals to
+  `teobeanie-move/<UTC time>/` in the config folder, with a sha256 per file. Copied into
+  the new install's config folder, it is taken in at that install's first start when
+  its journal is empty: all or nothing, journaled, and never twice. A person exports
+  through the panel; no MCP tool does. See
+  [docs/moving.md](https://github.com/teob-cc/teobeanie/blob/main/docs/moving.md).
+
 ## 0.4.0 — develop and operate behaviours over MCP
 
 - **Develop and operate over MCP.** New tools let an agent work on the behaviours

@@ -213,6 +213,11 @@ Everything durable lives in `/data` (included in Home Assistant backups):
 tokens' names and salted hashes, never the tokens).
 The raw-signal ring `signals.db` is excluded from backups by design.
 
+A backup restores only into the same add-on. To move to another install (a local
+add-on to this one, or a new Home Assistant box), export on the Connect page and copy
+the export into the new add-on's config folder before its first start
+([docs/moving.md](https://github.com/teob-cc/teobeanie/blob/main/docs/moving.md)).
+
 Your configuration (`heuristics.json`, the packages in `packages/` with
 `teobeanie.lock.json`, optionally `heuristics/*.js`, `allowlist.json`, the house scope,
 and `tiles.json`) lives in this add-on's config folder, visible in the `addon_configs` share via the Samba or

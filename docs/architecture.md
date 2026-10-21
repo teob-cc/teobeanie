@@ -57,7 +57,7 @@ rest. Two folders matter:
 | Folder | Holds | In HA backups |
 |---|---|---|
 | `/data` | `journal.db`, `signals.db`, `views.db`, `options.json`, `agent-tokens.json` (names and salted hashes), `revisions/` (the working set's revisions) | yes, except `signals.db` |
-| `/config` (`addon_configs/<slug>`) | `heuristics.json`, `allowlist.json`, `tiles.json`, `teobeanie.lock.json`, `heuristics/`, `packages/` — the working set | yes |
+| `/config` (`addon_configs/<slug>`) | `heuristics.json`, `allowlist.json`, `tiles.json`, `teobeanie.lock.json`, `heuristics/`, `packages/` — the working set; `teobeanie-move/` the exports for moving to another install ([moving.md](moving.md)) | yes |
 
 Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DIR`
 (default `.dev-data`), `CONFIG_DIR`; shadow mode is forced on.
@@ -140,7 +140,10 @@ the global pause, `Paused { at, by, reason? }` and `Resumed { at, by }`, folded 
 `teob-config/working-set` the working set's edits, `ConfigChanged { at, file, by, summary,
 instances? }` (section 6, item 3); `teob-access/agent-tokens` the agent tokens,
 `AgentTokenMinted { at, id, name, by }` and `AgentTokenRevoked { at, id, by }` (the
-hashes are in `/data/agent-tokens.json`, never in the journal); `teob-fact/<id>` one
+hashes are in `/data/agent-tokens.json`, never in the journal); `teob-move/install` a
+move to another install, `InstallExported { at, by, folder, events, lastPosition, signals }`
+and `InstallImported { at, folder, version, createdAt, events, lastPosition }`
+([moving.md](moving.md)); `teob-fact/<id>` one
 stream per fact (correlation `fact/<id>`).
 
 What the host writes, per fact:
@@ -682,11 +685,12 @@ src/
   replay.ts          replay and parity
   server.ts          HTTP routes, SSE, static panel, MCP mount; the agent port's app (/mcp only)
   connect.ts         the Connect page's API: agent tokens, the agent port's host port
+  move.ts            moving to another install: the export (api/move), the import at start
 panel/src/           views/ (House, Decisions, Heuristics, Studio, Today=Calls), studio/ (Monaco, test worker)
 teobeanie/          add-on packaging: config.yaml, Dockerfile, DOCS.md, translations
 packages/            the starter packages (one folder each: teobeanie.json, code, specs, README, example.json)
 examples/            starter working set, custom heuristic example
 scripts/             deploy-local-addon.sh, teobeanie-mcp-bridge.mjs, config-sync.sh (pull and push a config folder over SSH)
 skills/              the agent skills (onboard, develop, operate, explain, nodered-migration); .claude-plugin/ makes the repository a Claude Code plugin marketplace
-docs/                getting-started.md, heuristics.md, house.md, deploy.md, this file
+docs/                getting-started.md, heuristics.md, house.md, deploy.md, moving.md, this file
 ```
