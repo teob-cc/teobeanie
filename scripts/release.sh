@@ -48,7 +48,7 @@ perl -pi -e 's/^(export const SDK_VERSION = )"[^"]+"/$1"'"$version"'"/' src/pack
 for f in package.json panel/package.json .claude-plugin/plugin.json; do
   perl -0pi -e 's/("version":\s*)"[^"]+"/$1"'"$version"'"/' "$f"
 done
-perl -pi -e 's/^## Unreleased/## '"$version"'/ if !$done++ && /^## Unreleased/' "$changelog"
+perl -pi -e 'if (!$done && s/^## Unreleased/## '"$version"'/) { $done = 1 }' "$changelog"
 git diff --stat
 
 step "Gates"
