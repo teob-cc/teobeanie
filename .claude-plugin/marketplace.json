@@ -9,7 +9,7 @@
     {
       "name": "teobeanie",
       "source": "./",
-      "description": "Onboard a house, develop behaviours in shadow, take them active with consent, and explain why something happened, over Teobeanie's read-only MCP tools.",
+      "description": "Onboard a house, develop behaviours in shadow, take them active with consent, and explain why something happened, over Teobeanie's MCP tools.",
       "category": "home-automation",
       "tags": ["home-assistant", "home-automation", "mcp"]
     }
