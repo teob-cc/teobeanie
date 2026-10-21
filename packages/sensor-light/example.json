@@ -1,0 +1,10 @@
+{
+  "heuristic": "sensor-light",
+  "id": "hallway",
+  "mode": "shadow",
+  "params": {
+    "sensors": ["binary_sensor.hallway_motion"],
+    "lights": ["light.hallway"],
+    "offAfterMin": 3
+  }
+}

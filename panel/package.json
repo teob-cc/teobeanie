@@ -1,0 +1,24 @@
+{
+  "name": "teobeanie-panel",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.57.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "sucrase": "^3.35.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "typescript": "^7",
+    "vite": "^7"
+  }
+}

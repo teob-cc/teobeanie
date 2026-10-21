@@ -1,0 +1,15 @@
+{
+  "heuristic": "climate-guard",
+  "id": "den",
+  "mode": "shadow",
+  "params": {
+    "climate": "climate.den_unit",
+    "setpoints": {
+      "heat": 20,
+      "cool": 22
+    },
+    "maxRunMin": 180,
+    "startHeatBelow": 17,
+    "startCoolAbove": 25
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "instances": [
+    { "heuristic": "hallway-light", "id": "main", "mode": "shadow", "params": {} },
+    { "heuristic": "pump-run-on", "id": "main", "mode": "shadow", "params": {} }
+  ]
+}

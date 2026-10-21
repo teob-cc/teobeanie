@@ -1,0 +1,52 @@
+configuration:
+  llm_provider:
+    name: LLM provider
+    description: Optional AI copilot backend. "none" disables all LLM features.
+  openrouter_api_key:
+    name: OpenRouter API key
+    description: Required when LLM provider is "openrouter".
+  openrouter_model:
+    name: OpenRouter model
+    description: Model identifier used for explanations, digests, and drafting.
+  ollama_url:
+    name: Ollama URL
+    description: Base URL of an Ollama server (e.g. http://192.168.1.50:11434) when LLM provider is "ollama".
+  llm_monthly_budget_usd:
+    name: LLM monthly budget (USD)
+    description: Hard spend cap enforced by the spend guard; LLM calls stop when reached.
+  telegram_bot_token:
+    name: Telegram bot token
+    description: Optional. Enables notifications via a Telegram bot.
+  telegram_chat_id:
+    name: Telegram chat ID
+    description: Chat or group ID the bot sends notifications to.
+  telegram_alerts_chat_id:
+    name: Telegram alerts chat ID
+    description: A second chat for watching the house. Notices of instances marked "alerts" in heuristics.json go there as well; it takes no commands.
+  telegram_commands:
+    name: Telegram commands
+    description: Take /commands from that chat. A bot can have only one reader, so switch this on only when no other client (Node-RED) polls the bot.
+  monitor_alerts:
+    name: Problems in the chat
+    description: Tell the Telegram chat when Home Assistant is unreachable, an action is refused or fails, a heuristic throws, or another automation calls an entity an active heuristic controls. One message per problem until it clears, at most 6 an hour.
+  monitor_summary_time:
+    name: Daily summary time
+    description: Local time (HH:MM, e.g. 21:00) of a daily summary in the Telegram chat, per heuristic instance. Empty for none.
+  monitor_ha_down_min:
+    name: Home Assistant down (minutes)
+    description: How long Home Assistant may be unreachable before the chat is told.
+  time_zone:
+    name: Time zone
+    description: The house's time zone (e.g. America/New_York) for time-of-day rules, the daily summary and local times. Empty (the default) uses Home Assistant's.
+  signal_retention_days:
+    name: Signal retention (days)
+    description: How long raw sensor signals are kept in the ring store. Decisions are kept forever.
+  mcp_networks:
+    name: MCP networks
+    description: Networks (CIDR, e.g. 192.168.0.0/16) your AI agent may use the MCP tools from, through Home Assistant ingress. The default is the private LAN ranges and Tailscale; a public address is always refused unless you add it. Empty closes MCP.
+  shadow_mode:
+    name: Shadow mode
+    description: When on, heuristics decide and journal but never actuate. Recommended for new installs.
+  log_level:
+    name: Log level
+    description: Verbosity of the add-on log.

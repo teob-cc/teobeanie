@@ -1,0 +1,10 @@
+{
+  "heuristic": "leak-shutoff",
+  "id": "main-water",
+  "mode": "shadow",
+  "params": {
+    "sensors": ["binary_sensor.kitchen_leak", "binary_sensor.bathroom_leak"],
+    "valve": "valve.main_water",
+    "text": "Water leak — main water closed. Sensor:"
+  }
+}

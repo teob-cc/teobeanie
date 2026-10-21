@@ -1,0 +1,22 @@
+{
+  "name": "relay-pulse",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Momentary relay",
+  "description": "A latching relay that drives a push-button input is released after a short press, whoever pressed it.",
+  "pattern": "momentary",
+  "heuristics": {
+    "relay-pulse": {
+      "title": "Momentary relay",
+      "pattern": "momentary",
+      "roles": {
+        "relays": {
+          "domain": "switch",
+          "many": true,
+          "operate": true,
+          "doc": "The latching relays, each driving a momentary input."
+        }
+      }
+    }
+  }
+}

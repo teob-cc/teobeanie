@@ -1,0 +1,14 @@
+{
+  "heuristic": "appliance-auto-off",
+  "id": "coffee-machine",
+  "mode": "shadow",
+  "params": {
+    "occupancy": "binary_sensor.kitchen_motion",
+    "appliance": "switch.coffee_machine",
+    "vacantMin": 20,
+    "keepOn": {
+      "from": "07:00",
+      "to": "09:00"
+    }
+  }
+}

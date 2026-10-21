@@ -1,0 +1,7 @@
+{
+  "policyVersion": 1,
+  "entities": [
+    { "id": "sensor.washing_machine_power" },
+    { "id": "sensor.dishwasher_power" }
+  ]
+}

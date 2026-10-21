@@ -1,0 +1,33 @@
+{
+  "name": "garage-door",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Garage door",
+  "description": "Open and close a garage door by command through its opener's step button, with an optional auto-close.",
+  "pattern": "command",
+  "heuristics": {
+    "garage-door": {
+      "title": "Garage door commands",
+      "pattern": "command",
+      "roles": {
+        "button": {
+          "domain": "switch",
+          "operate": true,
+          "doc": "The momentary relay on the opener's step input (shared by a relay-pulse instance)."
+        },
+        "contact": {
+          "domain": "binary_sensor",
+          "device_class": ["garage_door", "door"],
+          "doc": "Door contact: on = open."
+        },
+        "autoClose.presence": {
+          "domain": "binary_sensor",
+          "device_class": ["occupancy", "motion", "presence"],
+          "optional": true,
+          "doc": "Someone there (an occupancy sensor): no countdown while it is on, nor while it reports nothing."
+        }
+      },
+      "uses": ["notify", "commands"]
+    }
+  }
+}

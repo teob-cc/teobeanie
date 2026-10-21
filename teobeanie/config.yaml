@@ -1,0 +1,56 @@
+name: Teobeanie
+version: "0.2.0"
+slug: teobeanie
+description: Behaviours for Home Assistant as tested pure functions, with a journal of every decision, built with your own AI agent over MCP
+url: https://github.com/teob-cc/teobeanie
+image: ghcr.io/teob-cc/{arch}-teobeanie
+arch:
+  - amd64
+  - aarch64
+init: false
+homeassistant_api: true
+hassio_api: true
+ingress: true
+panel_icon: mdi:home-lightning-bolt
+panel_title: Teobeanie
+map:
+  - type: addon_config
+    read_only: false
+backup_exclude:
+  - "signals.db"
+options:
+  llm_provider: none
+  openrouter_model: anthropic/claude-sonnet-4.5
+  llm_monthly_budget_usd: 10
+  monitor_alerts: true
+  monitor_ha_down_min: 5
+  signal_retention_days: 30
+  mcp_networks:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - fc00::/7
+    - fe80::/10
+    - 100.64.0.0/10
+    - fd7a:115c:a1e0::/48
+  shadow_mode: true
+  log_level: info
+schema:
+  llm_provider: list(none|openrouter|ollama)
+  openrouter_api_key: password?
+  openrouter_model: str?
+  ollama_url: url?
+  llm_monthly_budget_usd: float?
+  telegram_bot_token: password?
+  telegram_chat_id: str?
+  telegram_alerts_chat_id: str?
+  telegram_commands: bool?
+  monitor_alerts: bool?
+  monitor_summary_time: str?
+  monitor_ha_down_min: int(1,1440)?
+  time_zone: str?
+  signal_retention_days: int(7,3650)
+  mcp_networks:
+    - "match(^[0-9A-Fa-f:.]+/[0-9]{1,3}$)"
+  shadow_mode: bool
+  log_level: list(debug|info|warning|error)

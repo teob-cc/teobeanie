@@ -1,0 +1,9 @@
+# Never ship local state or credentials into the image build context.
+.token
+.env
+.dev-data
+.git
+**/node_modules
+dist
+panel-dist
+*.log

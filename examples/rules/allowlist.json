@@ -1,0 +1,9 @@
+{
+  "policyVersion": 1,
+  "entities": [
+    { "id": "binary_sensor.hallway_motion" },
+    { "id": "binary_sensor.boiler_heating" },
+    { "id": "light.hallway", "operate": true },
+    { "id": "switch.circulation_pump", "operate": true }
+  ]
+}

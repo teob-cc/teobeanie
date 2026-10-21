@@ -1,0 +1,11 @@
+packages:
+  - "."
+  - "panel"
+
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+# Framework development against a local teob-ts checkout: add
+#   overrides:
+#     '@lambda-house/teob-ts': link:../teob-ts
+# locally — never commit it: CI and the add-on image build from npm.

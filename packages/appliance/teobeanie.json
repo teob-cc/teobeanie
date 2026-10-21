@@ -1,0 +1,27 @@
+{
+  "name": "appliance",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Appliance auto-off",
+  "description": "An appliance switched off once its room has been empty for a while, with a keep-on window.",
+  "pattern": "trigger",
+  "heuristics": {
+    "appliance-auto-off": {
+      "title": "Appliance auto-off",
+      "pattern": "trigger",
+      "roles": {
+        "occupancy": {
+          "domain": "binary_sensor",
+          "device_class": ["occupancy", "motion", "presence"],
+          "doc": "The room's occupancy: on = someone there."
+        },
+        "appliance": {
+          "domain": "switch",
+          "operate": true,
+          "doc": "Switched off once the room has been empty for vacantMin."
+        }
+      },
+      "uses": ["clock", "triggers"]
+    }
+  }
+}

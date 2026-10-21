@@ -1,0 +1,25 @@
+{
+  "name": "hold",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Hold",
+  "description": "Put an entity into a value when a condition starts, and optionally keep it there while it lasts.",
+  "pattern": "hold",
+  "heuristics": {
+    "hold": {
+      "title": "Hold",
+      "pattern": "hold",
+      "roles": {
+        "target": {
+          "domain": ["climate", "light", "switch", "fan", "cover", "valve", "select", "input_boolean", "input_number"],
+          "operate": true,
+          "doc": "The entity put into the value."
+        },
+        "when.entity": {
+          "domain": ["climate", "binary_sensor", "switch", "input_boolean", "sensor"],
+          "optional": true
+        }
+      }
+    }
+  }
+}

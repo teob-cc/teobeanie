@@ -1,0 +1,18 @@
+{
+  "heuristic": "button-cover",
+  "id": "living-room-blinds",
+  "mode": "shadow",
+  "params": {
+    "buttons": [
+      {
+        "entity": "event.blinds_remote_up",
+        "position": 100
+      },
+      {
+        "entity": "event.blinds_remote_down",
+        "position": 0
+      }
+    ],
+    "covers": ["cover.living_room_blinds"]
+  }
+}

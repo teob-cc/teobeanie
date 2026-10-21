@@ -1,0 +1,11 @@
+{
+  "_readme": "Uses the custom heuristic in heuristics/appliance-done.js next to this file.",
+  "instances": [
+    { "heuristic": "appliance-done", "id": "washing-machine", "mode": "shadow",
+      "params": { "power": "sensor.washing_machine_power", "runningAbove": 10, "idleBelow": 3, "quietMin": 5,
+                  "text": "The washing machine is done." } },
+    { "heuristic": "appliance-done", "id": "dishwasher", "mode": "shadow",
+      "params": { "power": "sensor.dishwasher_power", "runningAbove": 10, "idleBelow": 2, "quietMin": 10,
+                  "text": "The dishwasher is done." } }
+  ]
+}

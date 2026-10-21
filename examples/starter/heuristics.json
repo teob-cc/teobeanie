@@ -1,0 +1,60 @@
+{
+  "_readme": "A starter house. Replace the entity ids with yours (Developer tools → States) and delete the instances you don't need. Everything starts in shadow: decisions are journaled, nothing is actuated. Set \"mode\": \"active\" per instance when its decisions look right, and turn the add-on's shadow_mode option off.",
+  "instances": [
+    { "heuristic": "night-light", "id": "hallway", "mode": "shadow", "params": {} },
+
+    { "heuristic": "sensor-light", "id": "hallway", "mode": "shadow",
+      "params": { "sensors": ["binary_sensor.hallway_motion"], "lights": ["light.hallway"], "offAfterMin": 3 } },
+
+    { "heuristic": "sensor-light", "id": "stairs", "mode": "shadow",
+      "params": { "sensors": ["binary_sensor.stairs_top_motion", "binary_sensor.stairs_bottom_motion"],
+                  "lights": ["light.stairs_top", "light.stairs_bottom"], "offAfterMin": 5,
+                  "levels": [{ "from": "23:00", "to": "06:30", "brightnessPct": 15, "colorTempK": 2200 }] } },
+
+    { "heuristic": "sensor-light", "id": "porch", "mode": "shadow",
+      "params": { "sensors": ["binary_sensor.porch_motion"], "lights": ["switch.porch_light"], "offAfterMin": 5,
+                  "dark": { "illuminance": "sensor.porch_illuminance", "below": 50 } } },
+
+    { "heuristic": "door-nag", "id": "front-door", "mode": "shadow",
+      "params": { "door": "binary_sensor.front_door", "everyMin": 5, "text": "The front door is still open." } },
+
+    { "heuristic": "door-nag", "id": "fridge", "mode": "shadow",
+      "params": { "door": "binary_sensor.fridge_door", "everyMin": 2, "text": "The fridge door is open." } },
+
+    { "heuristic": "sustained-notice", "id": "doorstep-visitor", "mode": "shadow",
+      "params": { "entity": "binary_sensor.doorstep_motion", "forMin": 3, "text": "Someone has been at the door for 3 minutes." } },
+
+    { "heuristic": "leak-shutoff", "id": "main-water", "mode": "shadow",
+      "params": { "sensors": ["binary_sensor.kitchen_leak", "binary_sensor.bathroom_leak", "binary_sensor.boiler_room_leak"],
+                  "valve": "valve.main_water", "text": "Water leak — main water closed. Sensor:" } },
+
+    { "heuristic": "follow-with-run-on", "id": "circulation-pump", "mode": "shadow",
+      "params": { "demand": "binary_sensor.boiler_heating", "target": "switch.circulation_pump", "runOnMin": 15 } },
+
+    { "heuristic": "appliance-auto-off", "id": "coffee-machine", "mode": "shadow",
+      "params": { "occupancy": "binary_sensor.kitchen_motion", "appliance": "switch.coffee_machine", "vacantMin": 20,
+                  "keepOn": { "from": "07:00", "to": "09:00" } } },
+
+    { "heuristic": "hold", "id": "living-room-setpoint", "mode": "shadow",
+      "params": { "target": "climate.living_room", "value": { "temperature": 20 },
+                  "when": { "entity": "climate.living_room", "is": ["heat"] } } },
+
+    { "heuristic": "button", "id": "coffee-remote", "mode": "shadow",
+      "params": { "mqtt": { "topic": "zigbee2mqtt/Coffee remote" },
+                  "presses": [{ "action": "on", "set": [{ "entity": "switch.coffee_machine", "to": "on" }] },
+                              { "action": "off", "set": [{ "entity": "switch.coffee_machine", "to": "off" }] }],
+                  "uses": ["switch.coffee_machine"] } },
+
+    { "heuristic": "relay-pulse", "id": "garage-opener", "mode": "shadow",
+      "params": { "relays": ["switch.garage_opener_relay"], "pressMs": 1000, "recheckMs": 5000 } },
+
+    { "heuristic": "garage-door", "id": "garage", "mode": "shadow",
+      "params": { "button": "switch.garage_opener_relay", "contact": "binary_sensor.garage_door",
+                  "commands": { "open": "garage_open", "close": "garage_close" } } },
+
+    { "heuristic": "button-cover", "id": "living-room-blinds", "mode": "shadow",
+      "params": { "buttons": [{ "entity": "event.blinds_remote_up", "position": 100 },
+                              { "entity": "event.blinds_remote_down", "position": 0 }],
+                  "covers": ["cover.living_room_blinds"] } }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "name": "trigger",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Trigger",
+  "description": "Targets on while an input is active, off after a run-on: the generic form, occupancy lights, and a pump that follows a demand.",
+  "pattern": "trigger",
+  "heuristics": {
+    "trigger": {
+      "title": "Trigger",
+      "pattern": "trigger",
+      "roles": {
+        "when": {
+          "domain": ["binary_sensor", "switch", "input_boolean"],
+          "many": true,
+          "doc": "Any of these active triggers."
+        },
+        "targets": {
+          "domain": ["light", "switch", "fan"],
+          "many": true,
+          "operate": true,
+          "doc": "On while triggered, off after the run-on: light.*, switch.*, fan.*, ..."
+        },
+        "onlyBelow.sensor": {
+          "domain": "sensor",
+          "device_class": "illuminance",
+          "optional": true
+        }
+      }
+    },
+    "occupancy-light": {
+      "title": "Occupancy light",
+      "pattern": "trigger",
+      "roles": {
+        "occupancy": {
+          "domain": "binary_sensor",
+          "device_class": ["occupancy", "motion", "presence"],
+          "many": true,
+          "doc": "Any of these on = occupied."
+        },
+        "lights": {
+          "domain": ["light", "switch"],
+          "many": true,
+          "operate": true,
+          "doc": "light.* and/or switch.* entities."
+        },
+        "darkness.sensor": {
+          "domain": "sensor",
+          "device_class": "illuminance",
+          "optional": true
+        }
+      }
+    },
+    "follow-with-run-on": {
+      "title": "Follow with run-on",
+      "pattern": "trigger",
+      "roles": {
+        "demand": {
+          "domain": ["binary_sensor", "switch", "input_boolean"],
+          "doc": "The demand signal: on = demand."
+        },
+        "target": {
+          "domain": "switch",
+          "operate": true,
+          "doc": "On while there is demand, and for the run-on after it."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "heuristic": "night-leak",
+  "id": "house",
+  "mode": "shadow",
+  "params": {
+    "meter": "sensor.water_total"
+  }
+}

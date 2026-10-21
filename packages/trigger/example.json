@@ -1,0 +1,10 @@
+{
+  "heuristic": "follow-with-run-on",
+  "id": "circulation-pump",
+  "mode": "shadow",
+  "params": {
+    "demand": "binary_sensor.boiler_heating",
+    "target": "switch.circulation_pump",
+    "runOnMin": 15
+  }
+}

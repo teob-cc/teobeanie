@@ -1,0 +1,40 @@
+{
+  "name": "door-watch",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Door watch",
+  "description": "Reminders while a door stays open, and one message when someone lingers at a door.",
+  "pattern": "notice",
+  "heuristics": {
+    "door-nag": {
+      "title": "Door left open",
+      "pattern": "notice",
+      "roles": {
+        "door": {
+          "domain": "binary_sensor",
+          "device_class": ["door", "garage_door", "window", "opening"],
+          "doc": "The door contact: on = open."
+        },
+        "quietWhileOn": {
+          "domain": ["binary_sensor", "input_boolean"],
+          "device_class": ["occupancy", "motion", "presence"],
+          "optional": true,
+          "doc": "Skip a reminder (but keep counting) while this entity is on."
+        }
+      },
+      "uses": ["notify"]
+    },
+    "sustained-notice": {
+      "title": "Sustained presence notice",
+      "pattern": "notice",
+      "roles": {
+        "entity": {
+          "domain": "binary_sensor",
+          "device_class": ["occupancy", "motion", "presence"],
+          "doc": "Noticed once it has been on this long."
+        }
+      },
+      "uses": ["notify"]
+    }
+  }
+}

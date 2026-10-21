@@ -1,0 +1,15 @@
+{
+  "heuristic": "hold",
+  "id": "living-room-setpoint",
+  "mode": "shadow",
+  "params": {
+    "target": "climate.living_room",
+    "value": {
+      "temperature": 20
+    },
+    "when": {
+      "entity": "climate.living_room",
+      "is": ["heat"]
+    }
+  }
+}

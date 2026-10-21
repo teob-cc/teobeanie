@@ -1,0 +1,28 @@
+{
+  "name": "climate-guard",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Climate guard",
+  "description": "One air conditioner or heat pump kept within limits: setpoints per mode, a longest run, and starts on cold or heat.",
+  "pattern": "hold",
+  "heuristics": {
+    "climate-guard": {
+      "title": "Climate guard",
+      "pattern": "hold",
+      "roles": {
+        "climate": {
+          "domain": "climate",
+          "operate": true,
+          "doc": "The climate entity."
+        },
+        "temperature": {
+          "domain": ["sensor", "input_number"],
+          "device_class": "temperature",
+          "optional": true,
+          "doc": "A room temperature sensor; default the unit's own current_temperature."
+        }
+      },
+      "uses": ["notify", "clock", "commands"]
+    }
+  }
+}

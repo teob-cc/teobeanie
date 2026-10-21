@@ -1,0 +1,28 @@
+{
+  "name": "leak-guard",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Leak guard",
+  "description": "A leak sensor closes the main water valve; reopening it is never automatic.",
+  "pattern": "guard",
+  "heuristics": {
+    "leak-shutoff": {
+      "title": "Water leak shutoff",
+      "pattern": "guard",
+      "roles": {
+        "sensors": {
+          "domain": "binary_sensor",
+          "device_class": "moisture",
+          "many": true,
+          "doc": "Leak sensors: any of them wet closes the valve."
+        },
+        "valve": {
+          "domain": ["valve", "switch"],
+          "operate": true,
+          "doc": "The main water valve (a valve, or a switch that is on while open)."
+        }
+      },
+      "uses": ["notify"]
+    }
+  }
+}

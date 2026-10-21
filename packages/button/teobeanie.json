@@ -1,0 +1,54 @@
+{
+  "name": "button",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Buttons",
+  "description": "A press of a button or a remote sets entities; wall buttons move covers to fixed positions.",
+  "pattern": "button",
+  "heuristics": {
+    "button": {
+      "title": "Button",
+      "pattern": "button",
+      "roles": {
+        "events": {
+          "domain": "event",
+          "device_class": "button",
+          "many": true,
+          "optional": true,
+          "doc": "event.* entities whose presses count."
+        },
+        "presses[].set[].entity": {
+          "domain": ["light", "switch", "cover", "fan", "climate", "select", "input_boolean"],
+          "many": true,
+          "operate": true
+        },
+        "uses": {
+          "domain": ["light", "switch", "cover", "fan", "climate", "select", "input_boolean"],
+          "many": true,
+          "optional": true,
+          "operate": true,
+          "doc": "Targets another instance owns and shares (an appliance with its own auto-off), operated, not owned."
+        }
+      },
+      "uses": ["triggers"]
+    },
+    "button-cover": {
+      "title": "Button → cover position",
+      "pattern": "button",
+      "roles": {
+        "buttons[].entity": {
+          "domain": "event",
+          "device_class": "button",
+          "many": true
+        },
+        "covers": {
+          "domain": "cover",
+          "many": true,
+          "operate": true,
+          "doc": "The covers the buttons move."
+        }
+      },
+      "uses": ["triggers"]
+    }
+  }
+}

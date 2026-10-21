@@ -1,0 +1,10 @@
+{
+  "heuristic": "door-nag",
+  "id": "front-door",
+  "mode": "shadow",
+  "params": {
+    "door": "binary_sensor.front_door",
+    "everyMin": 5,
+    "text": "The front door is still open."
+  }
+}

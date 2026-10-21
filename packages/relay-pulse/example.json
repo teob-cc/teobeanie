@@ -1,0 +1,10 @@
+{
+  "heuristic": "relay-pulse",
+  "id": "garage-opener",
+  "mode": "shadow",
+  "params": {
+    "relays": ["switch.garage_opener_relay"],
+    "pressMs": 1000,
+    "recheckMs": 5000
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "water-meter",
+  "version": "1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
+  "title": "Water meter",
+  "description": "Notices from a pulse water meter: water running at night, and each shower summed up with its gas and cost.",
+  "pattern": "notice",
+  "heuristics": {
+    "night-leak": {
+      "title": "Water running at night",
+      "pattern": "notice",
+      "roles": {
+        "meter": {
+          "domain": "sensor",
+          "device_class": "water",
+          "doc": "The water meter's total in litres."
+        }
+      },
+      "uses": ["notify", "clock"]
+    },
+    "shower-summary": {
+      "title": "Shower summary",
+      "pattern": "notice",
+      "roles": {
+        "water": {
+          "domain": "sensor",
+          "device_class": "water",
+          "doc": "The water meter's total in litres."
+        },
+        "gas": {
+          "domain": "sensor",
+          "device_class": "gas",
+          "doc": "The gas meter's total in m³."
+        },
+        "hotWater": {
+          "domain": "binary_sensor",
+          "optional": true,
+          "doc": "On while the boiler heats tap water. Given: a use is hot only if it came on. Without: a use is hot when the gas meter moved by minGasM3."
+        },
+        "gasPrice": {
+          "domain": ["sensor", "input_number"],
+          "device_class": "monetary",
+          "optional": true,
+          "doc": "The gas price now, in €/m³."
+        }
+      },
+      "uses": ["notify", "clock"]
+    }
+  }
+}

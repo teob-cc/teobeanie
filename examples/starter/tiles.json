@@ -1,0 +1,26 @@
+{
+  "tiles": [
+    { "entityId": "sensor.power_consumption", "label": "Grid import", "kind": "power" },
+    { "entityId": "sensor.power_production", "label": "Grid export", "kind": "power" },
+    { "entityId": "sensor.solar_power", "label": "Solar", "kind": "power" },
+    { "entityId": "sensor.indoor_co2", "label": "CO₂ indoor", "kind": "co2" },
+    { "entityId": "sensor.indoor_temperature", "label": "Indoor", "kind": "temp" },
+    { "entityId": "binary_sensor.front_door", "label": "Front door", "kind": "binary" }
+  ],
+  "groups": {
+    "order": ["energy", "security", "lights", "climate", "outdoor", "presence", "safety", "other"],
+    "sections": {
+      "other": { "collapsed": true }
+    },
+    "keywords": {
+      "room": ["living", "kitchen", "bedroom", "bath", "attic", "basement"],
+      "outdoor": ["garden", "balcony", "terrace"],
+      "garage": ["garage", "carport"]
+    },
+    "entities": {
+      "switch.garage_opener_relay": { "section": "security", "group": "Garage" },
+      "binary_sensor.boiler_heating": { "name": "Boiler" },
+      "event.blinds_remote_*": { "section": "security", "group": "Blinds remote" }
+    }
+  }
+}

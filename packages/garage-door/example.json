@@ -1,0 +1,13 @@
+{
+  "heuristic": "garage-door",
+  "id": "garage",
+  "mode": "shadow",
+  "params": {
+    "button": "switch.garage_opener_relay",
+    "contact": "binary_sensor.garage_door",
+    "commands": {
+      "open": "garage_open",
+      "close": "garage_close"
+    }
+  }
+}

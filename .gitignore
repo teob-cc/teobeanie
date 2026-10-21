@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.dev-data/
+.env
+*.log
+.DS_Store
+.token
+panel-dist/
+*.tsbuildinfo
+.claude/worktrees/
