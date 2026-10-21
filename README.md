@@ -5,9 +5,18 @@ decision, built with your own AI agent over MCP.**
 
 [![Add repository to my Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fteob-cc%2Fteobeanie)
 
-> **Status: alpha (0.2).** Heuristics run in shadow mode next to your existing
-> automations: they decide and journal what they *would* do, and the panel shows how
-> often your current system did the same.
+Your house's behaviour, engineered the way serious software is. Home Assistant stays
+the source of truth; Teobeanie keeps a small typed model of the part that matters and
+runs behaviours on it as deterministic pure functions over an event-sourced journal of
+immutable events. Every change goes through continuous delivery for the house: specs,
+a replay against your real history, shadow, then active, and every step can be undone.
+Your AI agent is the workbench: it explores, writes, tests and explains with the whole
+record and the code in reach. Execution is plain deterministic code, with no LLM in the
+loop.
+
+> **Status: alpha (0.2).** Behaviours run in shadow next to your existing automations
+> until you switch them on: they decide and journal what they *would* do, and the panel
+> shows how often your current system did the same.
 
 ## Start with your agent
 
