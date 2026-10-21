@@ -68,6 +68,7 @@ The heuristic types and their parameters are described in
 | Heuristics | One card per instance: mode, last decision, 24 h activity, agreement with existing automations, pending timers. Click a card for its history and configuration |
 | Calls | Every `call_service` in Home Assistant, with who made it: Teobeanie, a person (by HA user name), a system user such as the Supervisor (other add-ons call as it), or `device` when the call carries no user. Reading user names needs an admin token; without one users show as `user <id>` |
 | Studio | Your rules and heuristics in an editor typed against the house scope, with their tests running as you type; the packages in `packages/` read-only, with the instances that use them |
+| Connect | Agent tokens: mint one per AI agent (shown once, with the line to paste into Claude Code and the JSON for other MCP clients), see when each was made, by whom and last used, and revoke it |
 
 ## MCP tools for agents
 
@@ -80,20 +81,39 @@ signal that started it), `signals` (an entity's recorded rows over a range), `ti
 in time order), `tool_calls` and `whoami`. Only the house scope
 (`allowlist.json`) exists for them, and every call is journaled with its caller.
 
-The only way in is Home Assistant ingress, so Home Assistant authenticates every
-request, and the client must connect from one of the `mcp_networks`: by default the
-private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, fe80::/10) and
-Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is refused unless you
-add its network. A local MCP client such as Claude Code connects through
-`scripts/teobeanie-mcp-bridge.mjs`, which opens an ingress session with a long-lived token
-of an admin user and finds the installed add-on by itself (`ADDON=<slug>` picks one):
+There are two ways in, and both accept only clients from the `mcp_networks`: by
+default the private LAN ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7,
+fe80::/10) and Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). A public address is
+refused unless you add its network.
+
+**The agent port** (8199, see [Network](#network)) serves `/mcp` and nothing else. Each
+request needs `Authorization: Bearer <agent token>`. Mint a token on the panel's
+**Connect** page: it is shown once, with the line to paste:
+
+```bash
+claude mcp add --transport http teobeanie http://homeassistant.local:8199/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Every call is journaled with the caller `agent:<token name>`. Only a salted hash of
+each token is kept (in `/data`). Revoking a token on the Connect page refuses it from
+the next request on. Minting and revoking are journaled with who did it, and only an
+admin's panel session (through ingress) can do either. Too many wrong tokens from one
+address are refused for ten minutes.
+
+**Home Assistant ingress** is the fallback: Home Assistant authenticates the request.
+A local MCP client that speaks only stdio connects through
+`scripts/teobeanie-mcp-bridge.mjs`, which opens an ingress session with a long-lived
+token of an admin user and finds the installed add-on by itself (`ADDON=<slug>` picks
+one):
 
 ```bash
 claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 \
   -e HA_TOKEN_FILE=<file with the token> -- node scripts/teobeanie-mcp-bridge.mjs
 ```
 
-`HA_URL` is Home Assistant's address on your LAN or your tailnet.
+`HA_URL` is Home Assistant's address on your LAN or your tailnet. Calls through the
+bridge are journaled with the Home Assistant user.
 
 ## Configuration
 
@@ -111,9 +131,19 @@ claude mcp add teobeanie -e HA_URL=http://homeassistant.local:8123 \
 | `monitor_ha_down_min` | Minutes Home Assistant may be unreachable before the chat is told (default 5) |
 | `time_zone` | The house's time zone (e.g. `America/New_York`) for time-of-day rules, the daily summary and local times; empty (the default) uses Home Assistant's |
 | `signal_retention_days` | Raw-signal ring retention (decisions are kept forever) |
-| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
+| `mcp_networks` | Networks (CIDR) an MCP client may use the tools from, on the agent port or through ingress. Default: the private LAN ranges and Tailscale. Empty: MCP is closed. The `MCP_NETWORKS` environment variable (comma-separated) overrides it, standalone too |
 | `shadow_mode` | Emergency switch: forces every instance to shadow, so nothing actuates (default off) |
 | `log_level` | Add-on log verbosity |
+
+## Network
+
+| Port | Meaning |
+|---|---|
+| `8199/tcp` | The agent port: `/mcp` for AI agents with an agent token, and nothing else. Default host port 8199. Change it here if 8199 is taken on the host; clear it to close the port (the bridge through ingress still works). The Connect page reads the host port from here. Restart the add-on after a change |
+
+The port speaks plain HTTP: on your LAN the token travels unencrypted, on your tailnet
+it is encrypted. Do not forward it to the internet. The panel and its API stay behind
+ingress only.
 
 ## Self-monitoring
 
@@ -143,7 +173,8 @@ It is read from the journal, so a restart during the day loses nothing.
 ## Data
 
 Everything durable lives in `/data` (included in Home Assistant backups):
-`journal.db` (decisions, kept forever) and `views.db` (rebuildable read models).
+`journal.db` (decisions, kept forever), `views.db` (rebuildable read models) and
+`agent-tokens.json` (the agent tokens' names and salted hashes, never the tokens).
 The raw-signal ring `signals.db` is excluded from backups by design.
 
 Your configuration (`heuristics.json`, the packages in `packages/` with

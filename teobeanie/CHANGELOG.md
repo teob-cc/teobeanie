@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Connect an agent from the panel.** The add-on opens an agent port (8199) that
+  serves the MCP tools and nothing else. Mint a token for each agent on the panel's new
+  **Connect** page, paste the `claude mcp add --transport http …` line it shows, and
+  revoke the token when the agent should stop. Tokens are kept as salted hashes, and
+  minting, revoking and every tool call are journaled with the token's name. No Home
+  Assistant token or bridge is needed to connect any more; the bridge through ingress
+  stays as the fallback. The port can be moved or closed in the add-on's Network
+  section.
+
 ## 0.2.0 — first public alpha
 
 Teobeanie runs a house's behaviours as small pure functions written in TypeScript,

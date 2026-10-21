@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Set up Teobeanie on a Home Assistant house with its owner. Checks the MCP connection, explores the house read-only with the owner's token, sums it up in one table, and suggests three starter packages whose roles fit the entities found, with the bindings and the reason for each. Use when someone has just installed Teobeanie, asks to set it up or onboard their house, or asks what Teobeanie could do for their house or which behaviours to start with.
+description: Set up Teobeanie on a Home Assistant house with its owner. Checks the MCP connection, explores the house read-only with the owner's Home Assistant token, sums it up in one table, and suggests three starter packages whose roles fit the entities found, with the bindings and the reason for each. Use when someone has just installed Teobeanie, asks to set it up or onboard their house, or asks what Teobeanie could do for their house or which behaviours to start with.
 ---
 
 # Onboard a house
@@ -37,8 +37,10 @@ files. Behaviours run in shadow until the owner says otherwise.
 
 Call the `teobeanie` MCP server's tools (in Claude Code: `mcp__teobeanie__<tool>`).
 
-1. `whoami`: the Home Assistant user, the network address and the house's time zone. It
-   proves that the bridge, ingress and the add-on all work.
+1. `whoami`: who the add-on thinks is calling, the network address and the house's
+   time zone. Over the agent port the caller is `via: "agent"` with the token's name;
+   through the bridge it is `via: "ingress"` with the Home Assistant user. Either way
+   it proves the connection and the add-on work.
 2. `house_scope`: what Teobeanie observes and may operate. On a fresh install there is
    no `allowlist.json` yet, so the scope is the starter's placeholder ids
    (`light.hallway`, `binary_sensor.front_door`, …). That is expected. `develop` writes
@@ -51,12 +53,22 @@ When the tools are missing or fail:
 
 | Symptom | Fix |
 |---|---|
-| No `teobeanie` tools at all | The MCP server is not added. Step 3 of `docs/getting-started.md` |
-| The bridge says "no Teobeanie add-on is installed" or "several Teobeanie add-ons" | Add `-e ADDON=<slug>` to `claude mcp add` (the slug is in the add-on page's URL, such as `abcd1234_teobeanie`) |
+| No `teobeanie` tools at all | The MCP server is not added. Steps 2 and 3 of `docs/getting-started.md`: the panel's **Connect** page mints a token and shows the line to run |
+| `unauthorized: …` (401) | The agent token was revoked or mistyped. The owner mints a new one on the Connect page; run `claude mcp remove teobeanie`, then the new line |
+| Connection refused, or a timeout, on port 8199 | The address is not reachable from this machine, or the agent port is closed or moved (the add-on's Configuration tab → **Network**) |
+| `too many attempts` (429) | Too many wrong tokens from this address. Wait ten minutes |
+| The bridge (the fallback) says "no Teobeanie add-on is installed" or "several Teobeanie add-ons" | Add `-e ADDON=<slug>` to `claude mcp add` (the slug is in the add-on page's URL, such as `abcd1234_teobeanie`) |
 | `forbidden: client … is not in the allowed networks` | The client's address is outside the add-on's `mcp_networks` option. The owner adds their network there and restarts the add-on |
-| Home Assistant rejected the token | Make a new long-lived token (profile → Security) and save it to the file again |
+| The bridge says Home Assistant rejected the token | Make a new long-lived token (profile → Security) and save it to the file again |
 
 ## 2. Explore Home Assistant, read-only
+
+The MCP tools see only Teobeanie's scope, so this step reads Home Assistant itself,
+with a long-lived token of an administrator in `~/.config/teobeanie/ha-token`. When
+the file is missing (`test -s ~/.config/teobeanie/ha-token`), ask the owner to make one:
+profile → **Security** → **Long-lived access tokens**, saved to that file with an
+editor, `chmod 600` ("Reading Home Assistant needs a token" in
+`docs/getting-started.md`). Never ask them to paste it into the chat.
 
 The inventory script reads `GET /api/config`, `GET /api/states` and one
 `POST /api/template` for areas and devices. It matches the entities to every starter
@@ -67,7 +79,8 @@ HA_URL=http://homeassistant.local:8123 HA_TOKEN_FILE=~/.config/teobeanie/ha-toke
   node "${CLAUDE_PLUGIN_ROOT}/skills/onboard/scripts/house-inventory.mjs"
 ```
 
-Use the same `HA_URL` as the MCP bridge (`claude mcp get teobeanie` shows it). Add
+`HA_URL` is Home Assistant's own address (port 8123): the host of the agent port's URL
+(`claude mcp get teobeanie` shows it), or the bridge's `HA_URL`. Add
 `--json` for every entity with its area, device, model and state. Pass a folder of
 packages as the first argument to match other packages than the starter set.
 
