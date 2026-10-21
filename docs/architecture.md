@@ -31,7 +31,7 @@ real house: entity ids, people, chats and routines live in each house's config f
                               projections (views.db) · read API · SSE
                                                  │
                      panel (House · Decisions · Heuristics · Studio · Calls)
-                     MCP tools (read-only, LAN or tailnet: agent port or ingress) · monitor · agent
+                     MCP tools (read · develop · operate; agent port or ingress) · monitor · agent
 ```
 
 Everything is wired in `src/main.ts`, in numbered steps: config and allowlist; HA
@@ -135,7 +135,7 @@ Rules add `DesiredChanged`, `Reasserted`, `Yielded`, `Tracked` (the `held`/`with
 bookkeeping) and `UnwatchedRead`; the packages' heuristics add their own domain events
 (`Opened`, `Nagged`, `Pressed`, `Arrived`, `LeakDetected`, …). The audit stream holds
 `HaCallServiceObserved { domain, service, entityIds, serviceData, haContextId, haUserId,
-by }`; the MCP stream `ToolCalled { tool, args, caller, ok, ms }`; `teob-control/pause`
+by }`; the MCP stream `ToolCalled { tool, args, caller, ok, ms, revision? }` (the revision a write tool made); `teob-control/pause`
 the global pause, `Paused { at, by, reason? }` and `Resumed { at, by }`, folded at boot;
 `teob-config/working-set` the working set's edits, `ConfigChanged { at, file, by, summary,
 instances? }` (section 6, item 3); `teob-access/agent-tokens` the agent tokens,
@@ -299,8 +299,10 @@ or an array of them. TypeScript runs as-is. `cli.js types <config folder>` gener
 entities and `.to()` compiles only for operable ones. The panel's Studio edits these
 files with the same types, runs their tests in a web worker against the simulator, and
 saves them; a saved file runs after a reload. Tests use `simulate()`: set states,
-advance time, fire triggers and commands, and assert on the calls and the `why`s. Replay
-(`cli.js replay`) runs a heuristic over the recorder's last days and compares what it
+advance time, fire triggers and commands, and assert on the calls and the `why`s. The
+`test_run` MCP tool runs the same specs inside the add-on, with vitest's matchers. Replay
+(`cli.js replay`, and the `replay` MCP tool) runs a heuristic over the recorder's last
+days, with the facts it reads evaluated over the same history, and compares what it
 would have done with what happened, optionally taking over from a named automation.
 
 ## 4. Effects
@@ -357,7 +359,7 @@ The surfaces, all behind ingress but MCP, which also has the agent port:
 |---|---|
 | **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it), Connect (mint, list and revoke agent tokens, with the line to paste); in the header, the global pause with who paused and when |
 | **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/connect` and `api/agent-tokens` (ingress only), `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
-| **MCP** (`/mcp`) | read-only tools. The house scope: `house_scope`, `house_state` (with the instances' cards and the facts), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`. All of HA, never recorded (only the call): `ha_registry` (areas, devices, entities; filters and pages), `ha_states`, `ha_history` (at most 7 days, 2000 points a page), `ha_services`, `suggest` (packages whose roles the registry fills, pre-bound). Every call journaled with its caller (`agent:<token name>` on the agent port, the HA user through ingress); a desktop client connects to the agent port with a token (`claude mcp add --transport http …`), or, as a fallback, through HA's ingress session with the stdio bridge script, from the LAN or the tailnet |
+| **MCP** (`/mcp`) | tools of three kinds (below): read (the house scope's record, all of HA), develop (write the working set, in shadow) and operate (change what the house does). Every call journaled with its caller (`agent:<token name>` on the agent port, the HA user through ingress), a write with its revision; a desktop client connects to the agent port with a token (`claude mcp add --transport http …`), or, as a fallback, through HA's ingress session with the stdio bridge script, from the LAN or the tailnet |
 | **Telegram** | notices, command replies, the monitor's alerts and the daily summary; `/commands` |
 | **CLI** (`dist/studio/cli.js`) | `init` (a starter working set with the starter packages), `types` (generate the house typings) and `replay`; both read the folder's packages, and the starter ones it does not have yet |
 | **Monitor** | posts to the chat when HA has been unreachable, an action was refused or failed, a heuristic threw, a system user switched an entity an active instance controls, or someone paused or resumed the heuristics; one message per problem until it clears, at most six an hour; an optional daily summary |
@@ -365,8 +367,8 @@ The surfaces, all behind ingress but MCP, which also has the agent port:
 ### Who may reach the MCP tools
 
 One MCP server (`src/mcp/index.ts`), two doors, each with its access check in
-`src/mcp/access.ts`. The tools are the same and read-only behind both, and every call
-is journaled with its caller.
+`src/mcp/access.ts`. The tools are the same behind both, and every call is journaled
+with its caller.
 
 - **Ingress** (port 8099): the request comes from the Supervisor's ingress gateway, so
   Home Assistant has authenticated an admin's session; the client's address (the last
@@ -394,6 +396,33 @@ is journaled with its caller.
 - The agent port is plain HTTP. On the tailnet WireGuard encrypts it; on the LAN the
   token is in the clear, as the LAN's own HA traffic usually is. The owner can move or
   close the port in the add-on's Network section.
+
+### The MCP tools: read, develop, operate
+
+No tool switches a device: behaviours act, through the SafeActuator, and that stays
+the only way anything in the house is switched. Each tool is listed with MCP
+annotations (`readOnlyHint`, `destructiveHint`), so a client can ask its person before
+a call that changes something.
+
+| Kind | Tools | Annotations |
+|---|---|---|
+| **Read**, the house scope (`src/mcp/tools.ts`) | `house_scope`, `house_state` (with the instances' cards and the facts), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami` | read-only |
+| **Read**, all of HA, never recorded (`src/mcp/ha-tools.ts`) | `ha_registry` (areas, devices, entities; filters and pages), `ha_states`, `ha_history` (at most 7 days, 2000 points a page), `ha_services`, `suggest` (packages whose roles the registry fills, pre-bound) | read-only |
+| **Read**, the working set (`src/mcp/develop.ts`) | `package_list`, `file_read`, `test_run` (specs, as the Studio runs them: `src/testing/`), `replay` (the recorder over WebSocket, at most 7 days, facts evaluated), `package_export` (roles for the house's ids, then the privacy scan), `revisions`, `revision_diff`, `twin_compare` | read-only |
+| **Develop**: writes to the working set, in shadow | `package_install` (a starter package; a git URL is not built), `package_scaffold`, `file_write` (`heuristics.json`, `allowlist.json`, `tiles.json`, `heuristics/**`, `packages/**`; never the lock or generated files), `types` (generated typings, no revision), `scope_add` (observe only), `instance_upsert` (shadow or off, `twinOf`) | `readOnlyHint: false` |
+| **Operate**: what the house does | `instance_mode`, `scope_operate` (with a reason), `rollback`, `promote`, `pause`, `resume`, `command` (to the behaviours, sender `mcp`) | `destructiveHint: true` |
+
+Every write is one change applied through the reload path (`Reloader.write` and
+`edit`, `rollback`, `promoteTwin`): all or nothing, the folder put back when the reload
+rejects it, and journaled as the next revision with `by: mcp:<caller>`
+(`mcp:agent:<token name>`). The answer names the revision and the one to roll back to.
+The platform's own guardrails sit in the tools, under the ones the agent skills carry:
+`file_write` never adds `operate` or makes an instance active, `scope_add` only
+observes, `instance_upsert` never touches an active instance (a twin does), and
+`instance_mode` makes an instance active only when its specs pass now and it decided
+in shadow within the last 24 hours, else with an `override_reason` that is journaled
+in the revision's summary; a guard leaves active only with one too. The pause never
+stops a guard (the kernel's rule).
 
 ## 6. Scaffolding and the working set
 
@@ -533,8 +562,10 @@ One historical exception stays:
 
 The add-on declares the agent's options (`llm_provider`: none, OpenRouter or Ollama;
 model, key, URL, a monthly budget) but nothing reads them. What it does have is the
-agent's view of the house: the MCP tools, all read-only, journaled with their caller,
-scope-limited except the explore tools, which read all of HA and record none of it, and the design decision behind them, that a model reads the same record a
+agent's view of the house: the MCP tools, journaled with their caller, scope-limited
+except the explore tools, which read all of HA and record none of it; the develop and
+operate tools, which change the working set one revision at a time and never switch a
+device; and the design decision behind them, that a model reads the same record a
 person does and nothing more. The framework it builds on (teob-ts `ai`) ships the
 pieces: an `LLMService` with OpenRouter and OpenAI-compatible factories (`chatWithTools`,
 tracked variants for cost), a spend guard, a tool registry over the same `MCPTool` type
@@ -546,7 +577,8 @@ evaluator.
 
 - **It reads the record; it does not act.** The agent's tools are the house tools: state,
   changes with attribution, decisions with reasons, history, the heuristics and their
-  source. No actuation tools, as the README promises. When a judgement should lead to an
+  source; a desktop agent also develops and operates behaviours through revisions. No
+  actuation tools, as the README promises. When a judgement should lead to an
   action, it goes to a person (an ask in the chat) or, later and off by default, through
   a claimed instance and the same SafeActuator as every heuristic.
 - **Every judgement is journaled, with its evidence.** A question, the tool calls it
@@ -634,9 +666,11 @@ src/
     clock.ts         local-time helpers
   packages/          behaviour packages: manifest.ts (roles, platform), library.ts (load, starter install), lock.ts, suggest.ts (roles matched to the registry)
   house/             the House view: layout, summary, live service
-  mcp/               tools, ha-tools (explore all of HA), timeline (chain, signals, timeline), access (ingress peer and allowed networks, agent token), agents (agent tokens, teob-access stream), the mcp-audit stream
+  mcp/               tools, ha-tools (explore all of HA), develop (develop and operate, annotations), timeline (chain, signals, timeline), access (ingress peer and allowed networks, agent token), agents (agent tokens, teob-access stream), the mcp-audit stream
+  testing/           expect (vitest's matchers) and the spec runner: test_run and the Studio's worker
+  scope-edit.ts      allowlist.json edited in place (scope_add, scope_operate)
   ha-registry.ts     HA's area, device and entity registries for the explore tools, refreshed on registry events
-  studio/            cli (types, replay), house typings, file API
+  studio/            cli (types, replay), house typings (write-types: the CLI and the types tool), file API
   audit.ts           the ha-audit aggregate; attribution.ts: who made each call
   projections.ts     the call timeline view
   telegram.ts        the command lane (getUpdates)

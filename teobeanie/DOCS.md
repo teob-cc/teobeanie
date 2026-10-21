@@ -72,8 +72,9 @@ The heuristic types and their parameters are described in
 
 ## MCP tools for agents
 
-The add-on serves the house as read-only [MCP](https://modelcontextprotocol.io) tools at
-`/mcp`: `house_scope`, `house_state` (with the instances' cards and the facts, the derived state
+The add-on serves the house as [MCP](https://modelcontextprotocol.io) tools at `/mcp`.
+None of them switches a device: behaviours do, through the SafeActuator. The tools
+that read:  `house_scope`, `house_state` (with the instances' cards and the facts, the derived state
 the heuristics read), `recent_changes` (who changed what: Teobeanie, a person,
 a system user such as the Supervisor, an automation, the device), `history`, `heuristics`,
 `heuristic_source`, `decisions`, `chain` (why a journaled event happened, back to the
@@ -88,6 +89,23 @@ at most 7 days per call), `ha_services` (services and their fields) and `suggest
 behaviour packages whose roles your entities fill, pre-bound). They only read, and
 nothing they read is recorded; the calls are journaled like the others. With them an
 agent needs no Home Assistant MCP server of its own.
+
+**Develop and operate.** More tools change the config folder, one revision at a time
+(the panel's **Revisions** list shows each, journaled as `mcp:<agent>`, and rolls any
+of them back). Develop, in shadow: `package_list`, `package_install` (a starter
+package), `package_scaffold` (a new package), `file_read`, `file_write` (the working set
+only: `heuristics.json`, `allowlist.json`, `tiles.json`, `heuristics/`, `packages/`),
+`types`, `test_run` (the specs, as the Studio runs them), `replay` (the recorder's last
+days, at most 7), `scope_add` (observe only), `instance_upsert` (shadow or off) and
+`package_export` (a package with your entity ids swapped for its roles, after a privacy
+scan). Operate: `instance_mode`, `scope_operate` (with a reason), `revisions`,
+`revision_diff`, `rollback`, `twin_compare`, `promote`, `pause`, `resume` and `command`.
+A change the reload rejects leaves the folder as it was. `instance_mode` makes an
+instance active only when its specs pass and it decided in shadow within the last day,
+unless the call gives a reason, which is journaled. The operate tools are marked
+destructive, so your MCP client can ask you before each one. The agent skills (see
+[Getting started](#getting-started)) add the rest of the guardrails: the agent shows
+you the evidence and asks before it acts.
 
 There are two ways in. The agent port is protected by the agent token alone (see
 [Network](#network)). Ingress accepts only clients from the `mcp_networks`: by default
@@ -159,7 +177,7 @@ The agent port is protected by the agent token alone. It does not check where a 
 comes from: on Home Assistant OS the host's port mapping shows every client as the same
 address, so the port cannot tell your LAN from anywhere else. Anyone who can reach the
 port can try tokens. A token is 256 bits of randomness, one per agent, and revocable on
-the Connect page. The tools are read-only: no device control. If you do not use the
+the Connect page. No tool controls a device. If you do not use the
 port, close it here.
 
 ## Self-monitoring

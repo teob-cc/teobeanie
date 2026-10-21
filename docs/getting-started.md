@@ -59,11 +59,13 @@ have and picks three: a light that follows a motion sensor, a reminder for a doo
 left open, a leak guard. Each comes with the entities it would use and one sentence on
 why. You pick.
 
-For the ones you pick, it pulls the add-on's config folder into a git working copy on
-your machine, adds the entities to the scope (only the ones it switches may be
-switched), adds the instances in **shadow**, runs their specs and replays them over the
-last days. You see what they would have done next to what really happened. Then it
-asks, and pushes the folder back.
+For the ones you pick, it works through Teobeanie's develop tools, over the same
+connection: it adds the entities to the scope (it asks before letting Teobeanie switch
+any, and says why), adds the instances in **shadow**, runs their specs and replays
+them over the last days. You see what they would have done next to what really
+happened. It asks before each change. Every change is a numbered revision of the
+add-on's config, journaled with the agent's name: the panel's **Heuristics** tab lists
+them, and any of them can be rolled back.
 
 In shadow an instance decides and writes down what it would do, and does nothing. Open
 **Teobeanie** in the sidebar: the **Decisions** tab shows every decision with its
@@ -71,8 +73,10 @@ reason, marked "would". Turn on **Other calls: same entities** to see your curre
 automations' calls next to them, with a green tick where both did the same.
 
 A day later, ask your agent how they did. It reads the shadow decisions with you
-(`operate` skill), and when you say yes it makes one instance active, and tells you
-how to undo it. Ask it "why did the hall light go off at 21:14?" at any time (`explain`
+(`operate` skill), and when you say yes it makes one instance active, after naming the
+revision to roll back to. Teobeanie checks too: it refuses to make an instance active
+unless its specs pass and it has decided in shadow within the last day. No tool
+switches a device: behaviours do, through the same safety gate as always. Ask it "why did the hall light go off at 21:14?" at any time (`explain`
 skill): it answers from the journal, with the event ids.
 
 The skills are `onboard`, `develop`, `operate`, `explain` and `nodered-migration`
@@ -80,28 +84,31 @@ The skills are `onboard`, `develop`, `operate`, `explain` and `nodered-migration
 
 ## The command line needs a Home Assistant token
 
-The agent explores Home Assistant through Teobeanie's tools (`ha_registry`,
-`ha_states`, `suggest`, …) with its agent token alone. A long-lived token of an
-administrator is needed only on the command line, where the develop skill types the
-scope (`types`) and replays history (`replay`) against Home Assistant itself, and for
-the bridge below. The agent asks you for one when it gets there: in Home Assistant,
+The agent explores, develops and operates through Teobeanie's tools with its agent
+token alone. A long-lived token of an administrator is needed only where something
+talks to Home Assistant itself: the develop skill's command-line fallback (`cli.js
+types` and `cli.js replay`), the scripts of the `nodered-migration` skill (they read and
+change Node-RED's flows and watch a cut-over), and the bridge below. The agent asks you
+for one when it gets there: in Home Assistant,
 open your profile → **Security** → **Long-lived access tokens** and create one. Save it
 to `~/.config/teobeanie/ha-token` (make the folder with `mkdir -p ~/.config/teobeanie`,
 paste the token in with an editor) and keep it to yourself
 (`chmod 600 ~/.config/teobeanie/ha-token`).
 
-## Editing the config needs SSH
+## The fallback: editing the config over SSH
 
-Reading the house over MCP needs only the agent token. Changing Teobeanie's config
-folder from your machine is a separate path: `config-sync.sh` copies it over SSH, which
-needs the **Terminal & SSH** add-on with your public key in its `authorized_keys`
-option. `ssh root@homeassistant.local` should log you in without a password. The agent checks this before it changes anything, and asks you to set it up
-if it is missing. The develop skill also uses a clone of this repository, with Node.js
-22.18 or later and pnpm, for the specs, the typings and replay.
+The agent changes the config through Teobeanie's tools. If you keep the config folder
+in git on your machine, or run an add-on without the develop tools, the develop skill
+falls back to files: `config-sync.sh` copies the folder over SSH, which needs the
+**Terminal & SSH** add-on with your public key in its `authorized_keys` option
+(`ssh root@homeassistant.local` logs you in without a password), and a clone of this
+repository, with Node.js 22.18 or later and pnpm, for the specs, the typings and
+replay. A push is journaled as a revision too.
 
 ## Without an agent
 
-Everything the agent does goes through files and the panel, so you can do it by hand.
+Everything the agent changes is a file of the config folder that the panel edits too,
+so you can do it by hand.
 The panel's **Heuristics** tab has a **Library** of the packages: **Add an instance**
 opens a form with the settings, their units and defaults, and checks it as you type.
 The mode buttons on an instance switch it between shadow and active. The **Studio**
@@ -112,8 +119,10 @@ browser. [working-set.md](working-set.md) is the guide to the config folder.
 
 Any MCP client that speaks Streamable HTTP works: the Connect page also shows the JSON
 for clients configured with an `mcpServers` file. Mint one token per agent. The tools
-are read-only, the same for every client, and every call is journaled with the token's
-name (`tool_calls`). A client that speaks only stdio uses the bridge below. The skills
+are the same for every client, and every call is journaled with the token's name
+(`tool_calls`), a change with the revision it made. Each tool says whether it only
+reads, writes the config, or changes what the house does (marked destructive), so a
+client can ask you before the last kind. A client that speaks only stdio uses the bridge below. The skills
 are plain Markdown in [skills/](../skills): an agent that reads instructions can follow
 them.
 
@@ -157,10 +166,12 @@ the bridge are journaled with your Home Assistant user.
 | The bridge cannot find the add-on ("no Teobeanie add-on is installed", "several Teobeanie add-ons") | Name it: add `-e ADDON=<slug>` to `claude mcp add`. The slug is in the add-on page's address, such as `abcd1234_teobeanie` |
 | The bridge refused: `forbidden: client … is not in the allowed networks` (403) | Your machine's address is outside the add-on's `mcp_networks` option (default: the private LAN ranges and Tailscale), which applies to ingress only. Add your network there and restart the add-on |
 | Home Assistant rejected the token | Make a new long-lived token and save it to the file again |
-| A reload was rejected after a push | The add-on keeps the previous config. The reason is in the add-on's log (Settings → Add-ons → Teobeanie → Log) and on the panel's Heuristics tab. Fix the file, commit, push again |
+| A change was rejected | The add-on keeps the previous config, and the folder is as it was. The tool's answer says why (also the add-on's log and the panel's Heuristics tab). Fix it and try again |
+| "refused: … stays shadow because …" | Teobeanie makes an instance active only when its specs pass and it decided in shadow within the last day. Fix the spec, or wait for a decision |
 | An instance stays in shadow after "active" | Someone turned the add-on's `shadow_mode` emergency switch on. Turn it off on the add-on's Configuration tab and restart; every instance set to active then acts |
 
-Teobeanie is alpha (0.3). The MCP tools are read-only today. They explore all of Home
-Assistant (`ha_registry`, `ha_states`, `ha_history`, `ha_services`, `suggest`) and the
-house scope's record. MCP tools to develop and operate behaviours are on the
-[roadmap](../README.md#roadmap), not yet in the add-on.
+Teobeanie is alpha (0.3). Its MCP tools explore all of Home Assistant (`ha_registry`,
+`ha_states`, `ha_history`, `ha_services`, `suggest`) and the house scope's record,
+develop behaviours in shadow (`scope_add`, `instance_upsert`, `test_run`, `replay`, …)
+and operate them (`instance_mode`, `rollback`, `pause`, …). None of them switches a
+device.

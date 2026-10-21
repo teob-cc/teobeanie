@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **Develop and operate over MCP.** New tools let an agent work on the behaviours
+  through the same connection it explores with. Develop, in shadow: `package_list`,
+  `package_install` (a starter package), `package_scaffold` (a new package with a
+  passing spec), `file_read` and `file_write` (the config folder's working set only),
+  `types`, `test_run` (the specs, with vitest's matchers, as the Studio runs them),
+  `replay` (the recorder's last days, at most 7), `scope_add` (observe only),
+  `instance_upsert` (shadow or off, or a twin) and `package_export` (your entity ids
+  swapped for the package's roles, after a privacy scan). Operate: `instance_mode`,
+  `scope_operate` (with a reason), `revisions`, `revision_diff`, `rollback`,
+  `twin_compare`, `promote`, `pause`, `resume` and `command`. Every change is one
+  revision, journaled as `mcp:<agent>` and listed with the tool call; a change the
+  reload rejects leaves the folder as it was. An instance goes active only when its
+  specs pass and it decided in shadow within the last day, or with a reason that is
+  journaled. The operate tools are marked destructive, so a client asks first. No tool
+  switches a device.
+- **Replay evaluates facts.** A heuristic that reads a fact sees it over the replayed
+  history, in `cli.js replay` and the `replay` tool.
+- **The Studio's tests use vitest's matchers** (`toMatchObject`, `toContainEqual`,
+  `toBeUndefined`, `expect.arrayContaining`, …), the same the `test_run` tool uses.
+- **The skills develop and operate over the tools.** The SSH loop stays as the
+  fallback, and asks for the Home Assistant token its command line needs.
+
 ## 0.3.1 — the agent port is token-only
 
 On Home Assistant OS the host's port mapping shows every client of the agent port as

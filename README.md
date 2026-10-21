@@ -35,9 +35,10 @@ connects through Home Assistant ingress with
 fallback there).
 
 **Skills** ([skills/](skills)): `onboard` (explore the house, suggest starter packages),
-`develop` (a behaviour in shadow: scope, instance, specs, replay, push), `operate` (go
-active with the owner's yes, undo, the pause, refused actions), `explain` (why something
-happened, from the journal), `nodered-migration` (move Node-RED flows over, one at a time).
+`develop` (a behaviour in shadow: scope, instance, specs, replay), `operate` (go active
+with the owner's yes, the rollback named first, undo, the pause, refused actions),
+`explain` (why something happened, from the journal), `nodered-migration` (move
+Node-RED flows over, one at a time). They carry the guardrails the agent follows.
 
 ## What it is
 
@@ -52,12 +53,15 @@ happened, from the journal), `nodered-migration` (move Node-RED flows over, one 
 - **One gate for every call.** The SafeActuator checks scope, ownership, bounds and rate
   limits on every service call, and a global pause stops them all.
 - **Replay** runs a behaviour over recorded history before it touches anything.
-- **Your agent works on it over MCP.** Read-only tools give it the house scope, state,
+- **Your agent works on it over MCP.** Read tools give it the house scope, state,
   who changed what, decisions and their chains, and the behaviours' source. Others
   explore all of Home Assistant (registries, states, history, services) and suggest
   the packages that fit, without recording what they read: Home Assistant's own MCP
-  server is not needed. Each agent connects with a token of its own, minted and
-  revoked in the panel, and every call is journaled with its name.
+  server is not needed. Develop and operate tools write the config folder one
+  revision at a time (scope, instances in shadow, package code, specs, replay, going
+  active, rollback, the pause); none of them switches a device. Each agent connects
+  with a token of its own, minted and revoked in the panel, and every call is
+  journaled with its name.
 
 Built on [teob-ts](https://github.com/teob-cc/teob-ts), an event-sourcing framework.
 
@@ -103,8 +107,8 @@ the add-on's config folder, never in here.
 - MCP tools to explore Home Assistant ✓
 - Facts (derived state) ✓
 - Revisions and rollback ✓
+- MCP tools to develop and operate behaviours ✓
 - Next:
-  - MCP tools to develop and operate behaviours
   - a Home Assistant notify channel
   - the landing page, teob.cc/home
 
