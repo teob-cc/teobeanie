@@ -364,20 +364,7 @@ export async function rollback(deps: { store: RevisionStore; reloader: Reloader 
       const keep = (p: string): void => {
         if (!before.has(p)) before.set(p, existsSync(join(dir, p)) ? readFileSync(join(dir, p)) : undefined);
       };
-      for (const p of workingSetPaths(dir)) {
-        if (target.files[p] !== undefined) continue;
-        keep(p);
-        unlinkSync(join(dir, p));
-        pruneEmpty(dir, p);
-      }
-      for (const [p, hash] of Object.entries(target.files)) {
-        const abs = join(dir, p);
-        if (existsSync(abs) && hashOf(readFileSync(abs)) === hash) continue;
-        keep(p);
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, store.objects.get(hash)!);
-      }
-      return () => {
+      const restore = (): void => {
         for (const [p, bytes] of before) {
           const abs = join(dir, p);
           if (bytes === undefined) {
@@ -389,6 +376,26 @@ export async function rollback(deps: { store: RevisionStore; reloader: Reloader 
           }
         }
       };
+      try {
+        for (const p of workingSetPaths(dir)) {
+          if (target.files[p] !== undefined) continue;
+          keep(p);
+          unlinkSync(join(dir, p));
+          pruneEmpty(dir, p);
+        }
+        for (const [p, hash] of Object.entries(target.files)) {
+          const abs = join(dir, p);
+          if (existsSync(abs) && hashOf(readFileSync(abs)) === hash) continue;
+          keep(p);
+          mkdirSync(dirname(abs), { recursive: true });
+          writeFileSync(abs, store.objects.get(hash)!);
+        }
+      } catch (err) {
+        // A write that failed half way (a full disk): what was written is put back.
+        restore();
+        throw err;
+      }
+      return restore;
     },
   });
 }

@@ -224,7 +224,11 @@ export function createReloader(opts: {
       ];
       opts.log("info", `reload (${source}): ${outcome.summary}${keys.length > 0 ? ` — ${keys.join(", ")}` : ""}`);
       const journaled = await journal(changes, touched, before, outcome.at, by, summary, always);
-      if (journaled !== undefined) outcome.journaled = journaled;
+      if (journaled !== undefined) {
+        // The revision's file list stays in the journal: the panel's frames carry its number.
+        const { files: _files, ...shown } = journaled;
+        outcome.journaled = shown;
+      }
     } catch (err) {
       outcome = { ok: false, at: now(), source, by, error: (err as Error).message ?? String(err) };
       opts.log("warning", `reload (${source}) rejected, the running config stays: ${outcome.error}`);
