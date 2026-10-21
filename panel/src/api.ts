@@ -63,7 +63,9 @@ export type TimelineEntry =
       timers?: Array<{ timer: string; at: number }>;
       event_id: string;
     }
-  | { at: number; kind: "pause" | "config"; summary: string; by?: string; event_id: string };
+  | { at: number; kind: "pause" | "config"; summary: string; by?: string; event_id: string }
+  /** A fact's value changed: why, and what made it re-evaluate. */
+  | { at: number; kind: "fact"; fact: string; value: unknown; why?: string; input?: string; event_id: string; cause?: string };
 
 export interface SignalPoint {
   at: number;
@@ -250,7 +252,7 @@ export const api = {
       `api/signals/${encodeURIComponent(entityId)}?since=${sinceMs}`,
     ),
   /** Changes, calls, decisions, the pause and config edits around an entity or instance; `more` pages on. */
-  timeline: (p: { entity?: string; instance?: string; from?: number; to?: number; limit?: number; cursor?: string; order?: "asc" | "desc" }) =>
+  timeline: (p: { entity?: string; instance?: string; fact?: string; from?: number; to?: number; limit?: number; cursor?: string; order?: "asc" | "desc" }) =>
     getJson<{ from: number; to: number; rows: TimelineEntry[]; more?: string }>(`api/timeline?${qs(p)}`),
   tiles: () => getJson<{ at: number; tiles: Tile[] }>("api/tiles"),
   health: () => getJson<HealthReport>("health"),
