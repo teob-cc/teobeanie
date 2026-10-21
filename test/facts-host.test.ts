@@ -17,8 +17,8 @@ import { loadLibrary } from "../src/packages/library.js";
 import { createHouseService } from "../src/house/service.js";
 import type { FactInfo, HouseFrame } from "../src/house/view.js";
 
-const MOTION = "binary_sensor.shed_motion";
-const someone = fact("someone-in-shed", ({ ha }) => ha.binary_sensor.shed_motion.is("on"), { title: "Someone in the shed" });
+const MOTION = "binary_sensor.shed_occupancy";
+const someone = fact("someone-in-shed", ({ ha }) => ha.binary_sensor.shed_occupancy.is("on"), { title: "Someone in the shed" });
 const quiet = fact("shed-quiet", ({ ha }) => ha.facts.someoneInShed.is(false));
 
 const reader = defineHeuristic<{ fact: string }, Record<string, never>, never>({
@@ -113,7 +113,7 @@ describe("facts in the host", () => {
 
   it("wakes a fact when its time condition can flip", async () => {
     const t = setup(undefined, "on");
-    const empty = fact("shed-empty", ({ ha, held }) => held(() => ha.binary_sensor.shed_motion.is("off"), 80));
+    const empty = fact("shed-empty", ({ ha, held }) => held(() => ha.binary_sensor.shed_occupancy.is("off"), 80));
     await t.host.prepare({ library: [reader], facts: [someone, quiet, empty], instances, scope }).commit();
     await t.host.start(start);
     t.set("off", "obs-1"); // last_changed now: empty in 80 ms
@@ -155,13 +155,13 @@ describe("facts in the library", () => {
   };
   const manifest = (facts?: Record<string, object>) =>
     JSON.stringify({ name: "shed", version: "1.0.0", platform: ">=0.2.0", title: "Shed", heuristics: {}, ...(facts !== undefined ? { facts } : {}) });
-  const factFile = `import { fact } from "teobeanie";\nexport default fact("shed-busy", ({ ha }) => ha.binary_sensor.shed_motion.is("on"));\n`;
+  const factFile = `import { fact } from "teobeanie";\nexport default fact("shed-busy", ({ ha }) => ha.binary_sensor.shed_occupancy.is("on"));\n`;
 
   it("a heuristics/ file may default-export facts next to rules", async () => {
     const dir = folder({
       "heuristics/shed.ts": `import { fact, rule, keep } from "teobeanie";
 export default [
-  fact("shed-empty", ({ ha }) => ha.binary_sensor.shed_motion.is("off"), { title: "Shed empty" }),
+  fact("shed-empty", ({ ha }) => ha.binary_sensor.shed_occupancy.is("off"), { title: "Shed empty" }),
   rule("shed-light", ({ ha }) => ha.light.shed.to(ha.facts.shedEmpty.is(true) ? "off" : keep)),
 ];
 `,

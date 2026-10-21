@@ -7,7 +7,7 @@ import { simulate } from "../src/kernel/simulate.js";
 import { keep, rule } from "../src/kernel/rule.js";
 import { camelOf, fact, factNames, planFacts, snakeOf } from "../src/kernel/fact.js";
 
-const nobodyNear = fact("nobody-near-garage", ({ ha, held }) => held(() => ha.binary_sensor.garage_motion.is("off"), minutes(10)), {
+const nobodyNear = fact("nobody-near-garage", ({ ha, held }) => held(() => ha.binary_sensor.garage_occupancy.is("off"), minutes(10)), {
   title: "Nobody near the garage",
 });
 
@@ -15,7 +15,7 @@ const facts = (journal: Array<{ event: { tag: string } }>) => journal.filter((j)
 
 describe("fact()", () => {
   it("finds what it reads from its source and a first evaluation", () => {
-    expect(nobodyNear.watch()).toEqual(["binary_sensor.garage_motion"]);
+    expect(nobodyNear.watch()).toEqual(["binary_sensor.garage_occupancy"]);
     expect(nobodyNear.facts()).toEqual([]);
     const both = fact("both", ({ ha }) => ha.facts.nobodyNearGarage.value === true && ha.facts["other-fact"].is(true));
     expect(both.facts()).toEqual(["nobodyNearGarage", "other-fact"]);
@@ -23,29 +23,29 @@ describe("fact()", () => {
   });
 
   it("has a value and a since, journaled only when the value changes", () => {
-    const sim = simulate(nobodyNear, undefined, { "binary_sensor.garage_motion": "on" });
+    const sim = simulate(nobodyNear, undefined, { "binary_sensor.garage_occupancy": "on" });
     const t0 = sim.now;
     expect(sim.fact("nobody-near-garage")).toEqual({ value: false, since: t0 });
-    sim.set("binary_sensor.garage_motion", "off").advance(minutes(5)).set("binary_sensor.garage_motion", "on");
-    sim.set("binary_sensor.garage_motion", "off").advance(minutes(9));
+    sim.set("binary_sensor.garage_occupancy", "off").advance(minutes(5)).set("binary_sensor.garage_occupancy", "on");
+    sim.set("binary_sensor.garage_occupancy", "off").advance(minutes(9));
     expect(sim.fact("nobody-near-garage")?.value).toBe(false);
     const off = sim.now - minutes(9);
     sim.advance(minutes(1));
     expect(sim.fact("nobodyNearGarage")).toEqual({ value: true, since: off + minutes(10) });
     expect(sim.fact("nobody_near_garage")?.value).toBe(true);
-    sim.set("binary_sensor.garage_motion", "on");
+    sim.set("binary_sensor.garage_occupancy", "on");
     expect(facts(sim.journal).map((e) => [e.value, e.input])).toEqual([
       [false, { kind: "start" }],
       [true, { kind: "time" }],
-      [false, { kind: "signal", entity: "binary_sensor.garage_motion" }],
+      [false, { kind: "signal", entity: "binary_sensor.garage_occupancy" }],
     ]);
     const changed = sim.journal.find((j) => j.event.tag === "FactChanged" && (j.event as { value?: unknown }).value === true)!.event;
-    expect(changed).toMatchObject({ fact: "nobody-near-garage", inputs: { "binary_sensor.garage_motion": false }, why: "garage_motion is off for 10 min" });
+    expect(changed).toMatchObject({ fact: "nobody-near-garage", inputs: { "binary_sensor.garage_occupancy": false }, why: "garage_occupancy is off for 10 min" });
   });
 
   it("reads other facts, and is re-evaluated when one changes", () => {
     const quiet = fact("garage-quiet", ({ ha, between }) => ha.facts.nobodyNearGarage.is(true) && !between("07:00", "08:00"), { title: "Garage quiet" });
-    const sim = simulate(quiet, undefined, { "binary_sensor.garage_motion": "off" }, { facts: [nobodyNear] });
+    const sim = simulate(quiet, undefined, { "binary_sensor.garage_occupancy": "off" }, { facts: [nobodyNear] });
     expect(sim.fact("garage-quiet")?.value).toBe(false);
     sim.advance(minutes(10));
     expect(sim.fact("garage-quiet")).toEqual({ value: true, since: sim.now });
@@ -56,10 +56,10 @@ describe("fact()", () => {
 
 describe("rules and deciders read facts", () => {
   it("a rule reads ha.facts.<name> and re-evaluates when the fact changes", () => {
-    const light = rule("garage-light-off", ({ ha }) => ha.light.garage.to(ha.facts.nobodyNearGarage.is(true) ? "off" : keep));
-    expect(light.facts?.(undefined)).toEqual(["nobodyNearGarage"]);
-    expect(light.watch(undefined)).toEqual([]);
-    const sim = simulate(light, undefined, { "binary_sensor.garage_motion": "off", "light.garage": "on" }, { facts: [nobodyNear] }).start();
+    const garageLight = rule("garage-light-off", ({ ha }) => ha.light.garage.to(ha.facts.nobodyNearGarage.is(true) ? "off" : keep));
+    expect(garageLight.facts?.(undefined)).toEqual(["nobodyNearGarage"]);
+    expect(garageLight.watch(undefined)).toEqual([]);
+    const sim = simulate(garageLight, undefined, { "binary_sensor.garage_occupancy": "off", "light.garage": "on" }, { facts: [nobodyNear] }).start();
     expect(sim.calls()).toEqual([]);
     sim.advance(minutes(10));
     expect(sim.calls()).toEqual(["light.turn_off light.garage"]);
@@ -84,7 +84,7 @@ describe("rules and deciders read facts", () => {
       },
       evolve: (s) => s,
     });
-    const sim = simulate(tell, { fact: "nobody-near-garage" }, { "binary_sensor.garage_motion": "off" }, { facts: [nobodyNear] });
+    const sim = simulate(tell, { fact: "nobody-near-garage" }, { "binary_sensor.garage_occupancy": "off" }, { facts: [nobodyNear] });
     sim.advance(minutes(10));
     expect(sim.calls()).toEqual([`notify: nobody-near-garage: true since ${sim.now}`]);
     expect(() => simulate(tell, { fact: "missing" }, {}, { facts: [nobodyNear] })).toThrow(/reads fact missing/);

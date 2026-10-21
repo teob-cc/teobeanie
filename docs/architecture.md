@@ -96,10 +96,13 @@ the amd64 and aarch64 images and pushes them to GHCR.
 | **signals.db** | one row per routed state change: raw HA state, normalized value, HA context, origin (`ha`, `resync`, baseline) | the bridge, only for entities in the allowlist or watched by an instance, after the route's debounce (`on-change`, `deadband`, `throttle-ema`, `slow-context`) | `signal_retention_days` |
 | **journal.db** | every decision and its consequences; the audit of every `call_service` HA saw; every MCP tool call | the heuristic runtimes, the audit aggregate, the MCP wrapper | forever |
 | **views.db** | projections over the journal (today one: the newest 200 calls with who made them) | the projection runner, nudged on every persist | rebuildable |
+| **facts** (memory, from the journal) | each fact's value, since and `held`/`within` bookkeeping | the host, on a change of what a fact reads, on time, at start | folded from `teob-fact/<id>` at boot |
 
 The cache is read at decision time, so a heuristic sees the house as it is now; the
 signals store is history for the panel, the MCP tools and replay; the journal is the
-record that lets an instance be rebuilt after a restart and lets anyone ask why.
+record that lets an instance be rebuilt after a restart and lets anyone ask why. The
+facts (section 3) are the state aggregate made explicit: derived values with a since,
+kept in memory, journaled only when a value changes.
 
 ### The journal
 
@@ -131,7 +134,17 @@ bookkeeping) and `UnwatchedRead`; the packages' heuristics add their own domain 
 by }`; the MCP stream `ToolCalled { tool, args, caller, ok, ms }`; `teob-control/pause`
 the global pause, `Paused { at, by, reason? }` and `Resumed { at, by }`, folded at boot;
 `teob-config/working-set` the working set's edits, `ConfigChanged { at, file, by, summary,
-instances? }` (section 6, item 3).
+instances? }` (section 6, item 3); `teob-fact/<id>` one stream per fact (correlation
+`fact/<id>`).
+
+What the host writes, per fact:
+
+| Event | Meaning |
+|---|---|
+| `FactChanged { fact, value, since, inputs, why?, input }` | the value changed: what it read, the conditions it found, what made it re-evaluate (`signal`, `time`, `fact`, `start`); causation: the signal's `obsId`, the event that began a hold, or the `FactChanged` of a fact it reads |
+| `FactTracked { fact, set, clear }` | its `held`/`within` bookkeeping moved without a new value |
+
+`Decided` carries `facts`, the facts the decision read, next to `reads`.
 
 What is persisted per instance is the heuristic's own state, its timers, and its
 pending actions (rules: the desired value per entity, when it was last sent, which a
@@ -139,6 +152,11 @@ user overrode, the condition tracking). What lives only in memory: rate-limit wi
 the registry of the add-on's own outgoing calls, the HA user list, the registry caches.
 
 ### Recovery
+
+Each fact's stream is folded when the host attaches to the journal, so its value and
+since are known before anything starts; the start evaluates every fact again (a value
+that changed while the add-on was down gets the boot time as its since) before the
+instances get their `start`.
 
 Each instance runs in its own small in-memory runtime over the shared journal. At boot
 (and after a reload that changed it) the runtime replays the stream, re-arms every
@@ -153,7 +171,7 @@ crashed one recovers.
 
 `api/journal` (by category, entity, cursor, since, causation, correlation),
 `api/journal/chain/:eventId` (the causation chain), `api/signals/:entity` (since,
-until), `api/timeline` (below), `api/views/*`, and the MCP tools `decisions`,
+until), `api/timeline` (below), `api/facts`, `api/views/*`, and the MCP tools `decisions`,
 `recent_changes`, `history`, `chain`, `signals`, `timeline`, `tool_calls`. The panel's
 Decisions tab, the monitor and the agent all read the same rows.
 
@@ -164,7 +182,8 @@ a signal started ends at that signal row (the `origin`). `signals` is an entity'
 over a range with who caused each. `timeline` (for an entity: its changes, the calls on
 it, the decisions of the instances that watch, read or own it; for an instance: its
 decisions and what it watches and owns) merges those with the pause and the config
-changes in time order; every row carries its `event_id` or `obs_id`, and a page ends
+changes in time order (and, for an entity, an instance or a fact, `timeline?fact=<id>`,
+the `FactChanged` rows of the facts concerned); every row carries its `event_id` or `obs_id`, and a page ends
 with a `more` cursor. Config changes are read from the `teob-config` stream as
 `ConfigChanged` (section 6, item 3); one that names the instances it touched shows only
 in their timelines (and those of the entities they watch, read or own), one without
@@ -197,7 +216,14 @@ returns `{ why, events, actions, timers }`, `evolve(state, event)` folds the eve
 is what the starter packages use for anything with its own steps: a countdown with an
 announcement, a command with a confirmation, a relay that releases itself.
 
-Both declare what they touch: `watch`, `reads`, `actuates` (the ownership claim),
+A **fact** (`fact()`, `kernel/fact.ts`) is the third thing a file can export: derived
+state with a value and a since, written like a rule but returning a value instead of
+desired states. The host plans the facts with the instances (unique names, no cycle,
+in scope), evaluates them ahead of the instances on each signal and on their own
+timer, and journals a change in `teob-fact/<id>`. A rule reads `ha.facts.<name>`, a
+decider `ctx.fact(id)` with the fact declared in `facts`; a change is a `fact` input.
+
+Both declare what they touch: `watch`, `reads`, `facts`, `actuates` (the ownership claim),
 `shares` (others may use it too), `uses`, `commands` (and `commandArg`, the argument it
 answers for when several instances share a command; `commandHelp`, its line in the
 bot's menu; `commandButtons`, what a chat keyboard offers for it), `triggers` (HA time or MQTT
@@ -211,6 +237,7 @@ an instance starts, and two owners of one entity is an error.
 | `start` | the first HA snapshot, or a reload | reconcile with the current world |
 | `signal` | a watched entity changed (bridge, on change; attribute-only changes for enforced entities and the weather) | entity, value, state, `obsId`, origin, the HA user who caused it |
 | `timer` | a timer the instance set | id, data |
+| `fact` | a fact it declares changed its value | fact, value, since, the `FactChanged` event id |
 | `trigger` | a declared HA trigger fired (time, sun, MQTT topic) | id, HA variables |
 | `command` | the Telegram command lane (later the panel or the agent) | name, args, who sent it and through which channel |
 | `outcome` | an action finished | action id, ok, error, HA context id |
@@ -320,9 +347,9 @@ The surfaces, all behind ingress:
 
 | Surface | What it offers |
 |---|---|
-| **Panel** | House (the whole scope, grouped and live), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it); in the header, the global pause with who paused and when |
-| **Read API** | `health`, `api/heuristics`, `api/house`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
-| **MCP** (`/mcp`) | read-only tools: `house_scope`, `house_state`, `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`; every call journaled with its caller; a stdio bridge script connects a desktop client through HA's ingress session, from the LAN or the tailnet |
+| **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it); in the header, the global pause with who paused and when |
+| **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
+| **MCP** (`/mcp`) | read-only tools: `house_scope`, `house_state` (with the facts), `recent_changes`, `history`, `heuristics`, `heuristic_source`, `decisions`, `chain`, `signals`, `timeline`, `tool_calls`, `outdoor`, `whoami`; every call journaled with its caller; a stdio bridge script connects a desktop client through HA's ingress session, from the LAN or the tailnet |
 | **Telegram** | notices, command replies, the monitor's alerts and the daily summary; `/commands` |
 | **CLI** (`dist/studio/cli.js`) | `init` (a starter working set with the starter packages), `types` (generate the house typings) and `replay`; both read the folder's packages, and the starter ones it does not have yet |
 | **Monitor** | posts to the chat when HA has been unreachable, an action was refused or failed, a heuristic threw, a system user switched an entity an active instance controls, or someone paused or resumed the heuristics; one message per problem until it clears, at most six an hour; an optional daily summary |
@@ -512,9 +539,10 @@ src/
   kernel/
     heuristic.ts     Input, Action, Decision, DecideCtx, defineHeuristic, helpers
     rule.ts          rule(): World, Entity handles, held/within/between, enforce, compile
+    fact.ts          fact(): derived state; planning (names, cycles, scope) and the pure engine
     step.ts          the pure decide step, the kernel event grammar, resend
     kernel.ts        the teob-ts aggregate per instance, recovery
-    host.ts          instances, scope and ownership checks, runtimes, reload diff, commands
+    host.ts          instances, scope and ownership checks, runtimes, reload diff, commands, the facts' journal
     card.ts          an instance's card (view()) for the House page, its buttons checked
     actuator.ts      SafeActuator (vet, execute, retry), the Telegram notifier
     simulate.ts      the simulator used by tests and the Studio worker

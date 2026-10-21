@@ -26,13 +26,13 @@ describe("door-nag", () => {
   });
 
   it("reminds only while a fact holds: nobody moving near the garage for 5 min", () => {
-    const nobodyNear = fact("nobody-near-garage", ({ ha, held }) => held(() => ha.binary_sensor.garage_motion.is("off"), minutes(5)));
+    const nobodyNear = fact("nobody-near-garage", ({ ha, held }) => held(() => ha.binary_sensor.garage_occupancy.is("off"), minutes(5)));
     const p: DoorNagParams = { door: "binary_sensor.garage_door", everyMin: 3, text: "Garage door is still open, but no one in the garage!", onlyWhileFact: "nobody-near-garage" };
-    const sim = simulate(doorNag, p, { "binary_sensor.garage_door": "off", "binary_sensor.garage_motion": "on" }, { facts: [nobodyNear] });
+    const sim = simulate(doorNag, p, { "binary_sensor.garage_door": "off", "binary_sensor.garage_occupancy": "on" }, { facts: [nobodyNear] });
     sim.set("binary_sensor.garage_door", "on").advance(minutes(3));
     expect(sim.calls()).toEqual([]); // someone moving about
     expect(sim.whys().at(-1)).toBe("nobody-near-garage not true, staying quiet");
-    sim.set("binary_sensor.garage_motion", "off").advance(minutes(5)); // the reminder at 6 min: motion stopped 3 min ago
+    sim.set("binary_sensor.garage_occupancy", "off").advance(minutes(5)); // the reminder at 6 min: motion stopped 3 min ago
     expect(sim.calls()).toEqual([]);
     sim.advance(minutes(3)); // 9 min: nobody near for 6 min
     expect(sim.calls()).toEqual([`notify: ${p.text}`]);

@@ -53,7 +53,7 @@ import { fact, minutes } from "teobeanie";
 
 export const nobodyNearGarage = fact(
   "nobody-near-garage",
-  ({ ha, held }) => held(() => ha.binary_sensor.garage_motion.is("off"), minutes(5)),
+  ({ ha, held }) => held(() => ha.binary_sensor.garage_occupancy.is("off"), minutes(5)),
   { title: "Nobody near the garage for 5 minutes" },
 );
 

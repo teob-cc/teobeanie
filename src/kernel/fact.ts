@@ -2,7 +2,7 @@
 // time, and other facts) with a value and a since:
 //
 //   export default fact("nobody-near-garage", ({ ha, held }) =>
-//     held(() => ha.binary_sensor.garage_motion.is("off"), minutes(10)), { title: "Nobody near the garage" });
+//     held(() => ha.binary_sensor.garage_occupancy.is("off"), minutes(10)), { title: "Nobody near the garage" });
 //
 // It is written like a rule (rule.ts gives the World: ha, held, within, between, sun,
 // outdoor) and its inputs are found the same way: the entities in its source and those

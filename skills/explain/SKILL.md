@@ -33,9 +33,9 @@ All of it is read-only MCP tools of the `teobeanie` server (in Claude Code:
 
 | Tool | Gives |
 |---|---|
-| `house_state` | Current state, unit, last change, operable or not. Find an entity id by name here |
+| `house_state` | Current state, unit, last change, operable or not. Find an entity id by name here. Also the facts (derived state the heuristics read): value, since, what each reads and who reads it |
 | `recent_changes` | Changes and service calls in the scope, newest first, each with `by` |
-| `timeline` | Around an `entity` or an `instance`, in time order: changes, calls, decisions, the pause, config changes, each with its id |
+| `timeline` | Around an `entity`, an `instance` or a `fact`, in time order: changes, calls, decisions, fact changes (with why and cause), the pause, config changes, each with its id |
 | `decisions` | Teobeanie's decisions: input, `why`, each action with its status |
 | `chain` | An event's causation chain back to its origin, and what it caused |
 | `signals` | One entity's recorded rows over a range, with `by`, `cause` and `obs_id` |

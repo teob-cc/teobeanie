@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Facts: derived state.** `fact(id, ({ ha, held, within, between, sun, outdoor }) => value)`
+  says once what several behaviours need ("nobody near the garage for 5 minutes"), with a
+  value and a since. Facts live in packages and in `heuristics/*.ts`, may read other facts
+  (a cycle is refused), are journaled only when the value changes (`FactChanged` in
+  `teob-fact/<id>`, caused by the signal or the hold behind it) and are typed in
+  `ha.d.ts`. Rules read `ha.facts.<name>`, deciders `ctx.fact(id)` with the fact declared
+  in `facts`, and `simulate()` runs facts alongside (`sim.fact(id)`). The House page lists
+  them with their timelines; `api/facts`, `api/house`, `api/timeline?fact=`, and the MCP
+  `house_state` and `timeline` tools show them. door-watch's `door-nag` takes
+  `onlyWhileFact`: remind only while a fact such as `nobody-near-garage` holds.
+
 ## 0.2.0 — first public alpha
 
 Teobeanie runs a house's behaviours as small pure functions written in TypeScript,

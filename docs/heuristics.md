@@ -268,6 +268,75 @@ runs rules without the types; they are for writing them.
 `test/rules.test.ts` shows `occupancy-light` and `follow-with-run-on` written as rules
 that make the same calls at the same times as the deciders.
 
+## Facts: derived state
+
+Some things a house knows are not an entity: "nobody has moved near the garage for
+5 minutes", "the boiler heats while nobody is about". Several behaviours may need the
+same one. A **fact** says it once: a pure function of the scoped entities, time and
+other facts, with a value and a since (when it took that value).
+
+```ts
+import { fact, minutes } from "teobeanie";
+
+export const nobodyNearGarage = fact(
+  "nobody-near-garage",
+  ({ ha, held }) => held(() => ha.binary_sensor.garage_occupancy.is("off"), minutes(5)),
+  { title: "Nobody near the garage for 5 minutes" },
+);
+
+export default nobodyNearGarage;
+```
+
+A fact is written like a rule. It gets the same world (`ha`, `held`, `within`,
+`between`, `sun`, `outdoor`), and what it reads is found the same way: the
+`ha.domain.object_id` references in its source, what a first evaluation over an empty
+house reads, and an optional `watch: [...]`. Options: `title`, `description`, `unit`.
+Its value is any JSON value (`undefined` reads as `null`).
+
+- **Where they live.** In a package (named under `"facts"` in its `teobeanie.json`) or
+  in `heuristics/*.ts`. A file may default-export facts alone or in an array with rules
+  and deciders. Ids are kebab-case and unique.
+- **When they run.** The kernel evaluates a fact when an entity it reads changes, when
+  a `held`/`within`/`between` condition can flip, and when a fact it reads changes. On
+  a signal the facts go first, so a decision on the same signal sees them.
+- **What is journaled.** `FactChanged { fact, value, since, inputs, why, input }`, only
+  when the value changes, in the stream `teob-fact/<id>`. `inputs` are the values it
+  read (`"fact:<id>"` for a fact), `why` the conditions it found, `input` what made it
+  re-evaluate (`signal`, `time`, `fact`, `start`). Its cause is the signal row, the
+  event that began a hold, or the other fact's change. `FactTracked` keeps the
+  `held`/`within` bookkeeping. At boot each stream is folded, then every fact is
+  evaluated again; a value that changed while the add-on was down gets the boot time
+  as its since.
+- **Facts read facts**, never in a cycle: a cycle, a fact read that no fact defines,
+  two facts that read as the same name, or an entity outside the house scope leaves the
+  fact out at boot (logged) and rejects a reload. So does an instance that reads a fact
+  no running fact defines.
+
+**Reading a fact.** A rule reads `ha.facts.<name>`, by the id's camelCase or snake_case
+form (`ha.facts.nobodyNearGarage`, `ha.facts.nobody_near_garage`): `.value`, `.since`,
+and `.is(value)`, which goes into the reason like an entity's predicate. The rule
+re-evaluates when the fact changes. A decider declares the facts it reads,
+`facts: (p) => [p.onlyWhileFact]`, and reads them with `ctx.fact(id)` (`{ value, since }`,
+or `undefined` while it has none). Each change comes as a `fact` input. Every fact a
+decision reads is journaled with it (`Decided.facts`).
+
+```ts
+rule("garage-light-off", ({ ha }) => ha.light.garage.to(ha.facts.nobodyNearGarage.is(true) ? "off" : keep));
+```
+
+The door-watch package's `door-nag` takes `onlyWhileFact`: it reminds only while that
+fact is true. Its README shows the fact and the instance.
+
+**Types.** `cli.js types` (and the Studio) adds the facts to `ha.d.ts`, so a misspelled
+fact and a value it cannot take are compile errors. Each value is typed from the fact's
+export: a name (`export const nobodyNearGarage = fact(…)`) or a default export that is the
+fact itself. A fact only inside an exported array reads as any JSON value; export it by
+name too, so facts and rules in one file can read each other.
+
+**Seeing them.** The House page lists the facts with their value and since, each with
+its timeline. `GET api/facts` and `api/house` carry them; `api/timeline?fact=<id>` and
+the MCP `timeline` tool show a fact's changes; `house_state` lists them.
+
 ## Deciders
 
 A decider is a pure **decide** function plus an **evolve** over its own state. Everything it
@@ -279,6 +348,7 @@ defineHeuristic<Params, State, Event>({
   id: "door-nag",                       // journal category; instances are entities
   watch:    (p) => [p.door],            // changes delivered as signal inputs
   reads:    (p) => [p.quietWhileOn],    // readable via ctx.get(), never wake the heuristic
+  facts:    (p) => [p.onlyWhileFact],   // facts read via ctx.fact(); a change is a fact input
   actuates: (p) => [],                  // ownership claim, enforced by the SafeActuator
   forbids:  (p) => [],                  // services nobody may automate on an entity (optional)
   triggers: (p) => ({ ... }),           // HA trigger schema (time, sun, ...) by id
@@ -482,6 +552,10 @@ The manifest says what the package is and which entities each heuristic needs:
   `clock`, `sun`. The loader checks `commands`, `triggers` and `outdoor` against the code.
 - **`main`** (optional) names the files that default-export the heuristics; without it,
   every `.ts`, `.js` or `.mjs` file at the top of the folder does, specs aside.
+- **`facts`** (optional) names the facts the code defines, `{ "<id>": { "title": … } }`.
+  A fact the code defines and the manifest does not name (or the other way round) is an
+  error. A package of facts only may name no heuristics. A fact has no params, so a
+  generic package rarely ships one: its README shows the fact for the house to write.
 
 Packages load with `heuristics/` (below), on start and on every reload, all or nothing
 per package: a package whose manifest is wrong, whose code fails, or whose code and
@@ -510,7 +584,7 @@ kept as a package of its own, in its private config repository, and copied into
 
 Drop `.ts`, `.js` or `.mjs` files into `heuristics/` in the config folder. TypeScript
 runs as-is through Node's type stripping, with no build step. Each file
-default-exports a rule or heuristic definition, or an array of them:
+default-exports a rule or heuristic definition, a fact, or an array of them:
 
 ```ts
 // <config folder>/heuristics/hallway-light.ts
@@ -618,12 +692,14 @@ Telegram, the log level) are not part of a reload and still need a restart.
 | `start` | first HA states snapshot after boot | lets the heuristic reconcile with the current world (door already open, lights on in an empty room) |
 | `signal` | a watched entity changed (bridge, on-change) | `entity`, normalized `value`, raw `state`, `obsId` (row in `signals.db`), `origin` (`ha`/`resync`) |
 | `timer` | a timer this instance set came due | `timer`, `data` |
+| `fact` | a fact it declares (`facts`) changed its value | `fact`, `value`, `since`, `eventId` (the `FactChanged`) |
 | `trigger` | a declared HA trigger fired | trigger id, HA variables |
 | `command` | a named command arrived (the Telegram command lane, the panel's `POST api/command`; later the agent) | `command`, `args`, `from` (channel, user); `choices`: the first arguments the instances sharing it answer for (`commandArg`, one or several per instance), so one of them can answer an argument nobody else does |
 | `outcome` | an action requested in active mode finished | `actionId`, `ok`, `error`, `haContextId` |
 
 `ctx.now` is the input's timestamp. `ctx.get(entity)` reads a snapshot of declared
-entities, and every read is journaled with the decision. `ctx.timer(id)` returns the due
+entities, and every read is journaled with the decision. `ctx.fact(id)` reads a fact,
+journaled the same way. `ctx.timer(id)` returns the due
 time of a pending timer. Time-of-day rules convert explicitly (`kernel/clock.ts`,
 DST-safe) in the house's zone, `ctx.house.timeZone` (Home Assistant's, or the
 `time_zone` option; UTC until HA has said), never through the process time zone.
@@ -646,7 +722,7 @@ DST-safe) in the house's zone, `ctx.house.timeZone` (Home Assistant's, or the
 One decision is one atomic batch in the instance's stream:
 
 ```
-Decided{input, why, reads, mode}          ← causation: obsId | the TimerSet that fired | the action
+Decided{input, why, reads, facts?, mode}  ← causation: obsId | the TimerSet that fired | the action | the FactChanged
   <domain events>                         ← causation: Decided
   TimerSet{timer, at} | TimerCancelled    ← durable; re-armed from state after a restart
   ActionRequested{at} | ActionSuppressed | ActionRefused{reason}
@@ -668,6 +744,13 @@ call as), `user:<id prefix>` when HA would not list its users, or `device` when 
 has no user. Teobeanie recognises its own calls as they arrive: the actuator registers each
 call (service and entities) before sending it, and the context id HA returns. Rows
 journaled before attribution have no `by` and read as `nodered`.
+
+A fact has a stream of its own, `teob-fact/<id>` (correlation `fact/<id>`):
+
+```
+FactChanged{fact, value, since, inputs, why?, input}   ← causation: obsId | the event that began a hold | the FactChanged it read
+FactTracked{fact, set, clear}                           ← held/within bookkeeping without a new value
+```
 
 The kernel also guarantees:
 - A `decide` that throws is journaled as `DecideFailed` and does not crash the entity.
@@ -756,6 +839,13 @@ expect(sim.calls()).toEqual([]);                 // someone is in the garage
 sim.set("binary_sensor.garage_occupancy", "off").advance(minutes(6));
 expect(sim.calls()).toEqual([`notify: ${garage.text}`, `notify: ${garage.text}`]);
 ```
+
+Facts run alongside a definition as the host runs them, ahead of it on each change
+and on their own time: `simulate(doorNag, params, world, { facts: [nobodyNearGarage] })`,
+and `sim.fact("nobody-near-garage")` reads one (`{ value, since }`). A fact alone:
+`simulate(nobodyNearGarage, undefined, world)`. The journal holds the `FactChanged`
+rows. A heuristic that reads a fact the options do not give is refused, as the loader
+refuses it.
 
 ### Replaying history
 
