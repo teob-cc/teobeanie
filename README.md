@@ -147,13 +147,30 @@ into the new add-on's config folder before its first start:
 
 ### Releasing
 
-1. Bump the version in `package.json`, `teobeanie/config.yaml`, `SDK_VERSION` in
-   `src/packages/manifest.ts` and `.claude-plugin/plugin.json` (a test keeps them
-   equal), and add a `teobeanie/CHANGELOG.md` entry.
-2. Commit, then tag `v<version>` and push the tag.
-3. CI tests, lints and builds the `amd64` and `aarch64` images, and pushes
-   `ghcr.io/teob-cc/{arch}-teobeanie:<version>` on the tag. `config.yaml`'s `image:`
-   points there, so installs and updates pull exactly that version.
+The add-on store reads `teobeanie/config.yaml` from `main` and offers whatever version it
+names, so `main` must only name a version whose image exists. A release therefore builds
+first and reaches `main` last.
+
+1. Write the changes under `## Unreleased` at the top of `teobeanie/CHANGELOG.md` (or a
+   `## <version>` heading), on `main`, pushed, with CI green.
+2. From a clean, up-to-date `main`, run `scripts/release.sh <version>`. It bumps the
+   version in `package.json`, `panel/package.json`, `teobeanie/config.yaml`,
+   `SDK_VERSION` in `src/packages/manifest.ts` and `.claude-plugin/plugin.json` (a test
+   keeps them equal), dates the changelog section, runs the gates, commits on a branch
+   `release/v<version>` and pushes that branch and the tag `v<version>`. It never
+   touches `main`. `DRY_RUN=1` stops before the push.
+3. The tag run tests and lints, builds the `amd64` and `aarch64` images and pushes
+   `ghcr.io/teob-cc/{arch}-teobeanie:<version>`, checks that both pull anonymously
+   (`scripts/check-images.sh`), and only then fast-forwards `main` to the tag. From that
+   moment the store offers the version, and its image is already there.
+4. If a step fails, `main` is unchanged. Delete the tag and the branch
+   (`git push origin --delete v<version> release/v<version>`), fix, and release again. If
+   `main` moved after the branch was cut, the fast-forward is refused the same way.
+
+A push to `main` also checks that `config.yaml`'s version has both images on GHCR, so a
+version bumped by hand (without this recipe) fails loudly at once. The GHCR packages must
+be public. The `promote` job needs Actions to push to `main`: no branch protection that
+blocks `github-actions[bot]`.
 
 Pushes to `main` and pull requests run the same checks and image build without
 publishing. Before every push, run the privacy scan (`node scripts/privacy-scan.mjs`,

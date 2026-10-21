@@ -1,8 +1,12 @@
 name: CI & add-on images
 
 # Every push / PR: typecheck, tests, add-on lint, image build (no push).
-# A v* tag: the same, then push ghcr.io/<owner>/{amd64,aarch64}-teobeanie:<version>.
+# A v* tag (on a release/v<version> branch, see README "Releasing"): the same, then push
+# ghcr.io/<owner>/{amd64,aarch64}-teobeanie:<version>, check that both pull anonymously, and
+# only then fast-forward main to the tag. main carries a version only once its image exists,
+# because the add-on store reads config.yaml from main.
 # The tag must equal teobeanie/config.yaml's version: the Supervisor pulls exactly that tag.
+# A push to main also checks that the version it carries has its images (guard).
 
 on:
   push:
@@ -96,3 +100,44 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
           cache-from: type=gha,scope=${{ matrix.haarch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.haarch }}
+
+  # The images exist and pull anonymously, as an install pulls them.
+  verify:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-images.sh "${GITHUB_REF_NAME#v}"
+
+  # Only now does main carry the version. Fast-forward only: if main moved since the release
+  # branch was cut, this fails and the release is redone on the new main (README "Releasing").
+  # A push with GITHUB_TOKEN starts no workflow, so main is not built twice.
+  promote:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward main to the tag
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "main is not an ancestor of ${GITHUB_REF_NAME}: main moved after the release branch was cut." >&2
+            echo "Delete the tag and the release branch, then run scripts/release.sh again." >&2
+            exit 1
+          fi
+          git push origin "HEAD:refs/heads/main"
+
+  # main must never offer an update whose image is missing.
+  guard:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: main's add-on version has its images
+        run: scripts/check-images.sh

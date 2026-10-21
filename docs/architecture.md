@@ -88,7 +88,8 @@ for an *update*, which builds the new image while the old one keeps running and 
 them in about a second; a *rebuild* would stop first (`docs/deploy.md`). Installed from
 the repository, the Supervisor pulls the prebuilt image named by `image:` in
 `config.yaml`. CI type-checks, tests and lints on every push, and on a version tag builds
-the amd64 and aarch64 images and pushes them to GHCR.
+the amd64 and aarch64 images, pushes them to GHCR, checks they pull anonymously and then
+fast-forwards `main` to the tag, so `main` never names a version without its image.
 
 ## 2. State
 
