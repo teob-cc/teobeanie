@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 — the agent port is token-only
+
+On Home Assistant OS the host's port mapping shows every client of the agent port as
+the Supervisor network's gateway, so 0.3.0's network check there refused every agent.
+The agent port now trusts the agent token alone and no longer applies `mcp_networks`
+(ingress still does, since Home Assistant passes the real client address). A valid,
+unrevoked token is always served; wrong tokens are counted per address and in all, and
+past the limit they get 429 without being hashed, so one bad client cannot lock out the
+others. The local deploy script names a version after the commit, also for a tag.
+
 ## 0.3.0 — facts, revisions, explore and connect
 
 - **Revisions and rollback.** Every applied change to the config folder is a numbered

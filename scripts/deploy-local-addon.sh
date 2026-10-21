@@ -22,7 +22,7 @@ DIR="/local_apps/$SLUG"   # the SSH add-on's view of /addons on current HA OS
 # Every commit is its own add-on version (0.2.0-<sha>), so the Supervisor sees an update:
 # an update builds the new image while the old container runs and only then swaps
 # them, where a rebuild stops the add-on first (docs/deploy.md).
-VERSION="$(sed -n 's/^version: "\(.*\)"$/\1/p' teobeanie/config.yaml)-$(git rev-parse --short "$REV")"
+VERSION="$(sed -n 's/^version: "\(.*\)"$/\1/p' teobeanie/config.yaml)-$(git rev-parse --short "$REV^{commit}")"
 
 git archive "$REV" | ssh -o BatchMode=yes "root@$HA_HOST" "
   set -e
@@ -34,7 +34,7 @@ git archive "$REV" | ssh -o BatchMode=yes "root@$HA_HOST" "
   sed -e '/^image:/d' -e 's/^version: .*/version: \"$VERSION\"/' -e 's/^slug: .*/slug: $SLUG/' teobeanie/config.yaml > config.yaml
   rm -rf teobeanie repository.yaml test
   rm -rf $DIR && mv $DIR.new $DIR"
-echo "copied $(git rev-parse --short "$REV") to $HA_HOST:$DIR as version $VERSION"
+echo "copied $(git rev-parse --short "$REV^{commit}") to $HA_HOST:$DIR as version $VERSION"
 
 # Install on first run; afterwards update to the new version, or rebuild when this
 # version is already installed (the same commit again). Through the websocket
