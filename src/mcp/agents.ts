@@ -127,13 +127,21 @@ export function createAgentTokens(deps: {
   /** Journals a mint or a revocation; a failure undoes the change. */
   record: (event: AccessEvent) => Promise<void>;
   now?: () => number;
+  log?: (level: "error", msg: string) => void;
 }): AgentTokens {
   const now = deps.now ?? Date.now;
   const tokens = new Map<string, Stored>();
   const lastUsed = new Map<string, number>();
   if (deps.path !== undefined && existsSync(deps.path)) {
-    const stored = JSON.parse(readFileSync(deps.path, "utf8")) as { tokens?: Stored[] };
-    for (const t of stored.tokens ?? []) tokens.set(t.id, t);
+    try {
+      const stored = JSON.parse(readFileSync(deps.path, "utf8")) as { tokens?: Stored[] };
+      for (const t of stored.tokens ?? []) tokens.set(t.id, t);
+    } catch (err) {
+      // An unreadable file must not stop the add-on: no token is valid until new ones are minted.
+      const aside = `${deps.path}.unreadable`;
+      renameSync(deps.path, aside);
+      deps.log?.("error", `agent tokens: ${deps.path} could not be read (${String(err)}); moved to ${aside}, every agent needs a new token`);
+    }
   }
   const save = (): void => {
     if (deps.path === undefined) return;

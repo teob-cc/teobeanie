@@ -1,7 +1,7 @@
 // The agent port and its tokens: hashing, revocation, the failed-attempt limit, the
 // port that serves only /mcp, the audit's caller, and the Connect API (ingress only).
 
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -63,6 +63,16 @@ describe("agent tokens", () => {
     expect(tokens.verify(token.replace(info.id, "000000000000"))).toBeUndefined();
     for (const bad of ["", "tbn_", "Bearer x", token + "x", token.toUpperCase()]) expect(tokens.verify(bad), bad).toBeUndefined();
     expect(tokens.verify(token)).toBeDefined();
+  });
+
+  it("start empty, without stopping the add-on, when the file cannot be read", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "teob-agents-"));
+    writeFileSync(join(dir, "agent-tokens.json"), "{ not json");
+    const logged: string[] = [];
+    const tokens = createAgentTokens({ path: join(dir, "agent-tokens.json"), record: async () => {}, log: (_l, m) => logged.push(m) });
+    expect(tokens.list()).toEqual([]);
+    expect(existsSync(join(dir, "agent-tokens.json.unreadable"))).toBe(true);
+    expect(logged).toHaveLength(1);
   });
 
   it("record when each was last used, in memory", async () => {

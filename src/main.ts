@@ -494,7 +494,7 @@ const mcp = createMcp({
   record: (call) => void runtime.tell(MCP_ENTITY, { tag: "Record", call }, mcpCategory).catch((err) => log("error", `mcp journal: ${String(err)}`)),
   log: haLog,
 });
-const agentTokens = createAgentTokens({ path: join(config.dataDir, "agent-tokens.json"), record: createAccessJournal(runtime) });
+const agentTokens = createAgentTokens({ path: join(config.dataDir, "agent-tokens.json"), record: createAccessJournal(runtime), log });
 // The add-on's port is fixed by config.yaml; standalone, MCP_AGENT_PORT moves it.
 const agentPort = config.mode === "addon" ? AGENT_PORT : Number(process.env.MCP_AGENT_PORT ?? AGENT_PORT);
 const agentPortInfo: () => Promise<AgentPortInfo> =
