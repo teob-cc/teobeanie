@@ -64,6 +64,7 @@ import { supervisorPort, type AgentPortInfo } from "./connect.js";
 import { createPauseControl, pauseAggregate, pauseEventCodec, pauseStateCodec } from "./pause.js";
 import { configAggregate, configEventCodec, configStateCodec, createConfigJournal } from "./working-set.js";
 import { createRevisionStore, recordBootRevision } from "./revisions.js";
+import { createMoveJournal, importAtStart, importedEvent, moveAggregate, moveEventCodec, moveStateCodec } from "./move.js";
 
 const LEVELS = ["debug", "info", "warning", "error"] as const;
 
@@ -80,6 +81,11 @@ const haLog = (level: "debug" | "info" | "warn" | "error", msg: string): void =>
 
 const startedAt = Date.now();
 log("info", `starting Teobeanie in ${config.mode} mode (shadow=${config.options.shadow_mode})`);
+
+// 1a. A move from another install (move.ts): an export copied into the config folder's
+// teobeanie-move/ is taken in now, before anything reads the data dir or the config
+// folder, when this install's journal is empty. Journaled once the runtime is up (step 5).
+const moved = importAtStart({ dataDir: config.dataDir, configDir: config.configDir, log });
 
 // 2. Allowlist and tiles.json. Both are reloaded live with heuristics.json (step 10b):
 // the scope and house facts handed out below always answer from the current ones.
@@ -201,6 +207,7 @@ const { runtime, journal } = createSqliteRuntime({ path: journalPath, onPersiste
   registration(pauseAggregate, pauseEventCodec, pauseStateCodec),
   registration(configAggregate, configEventCodec, configStateCodec),
   registration(accessAggregate, accessEventCodec, accessStateCodec),
+  registration(moveAggregate, moveEventCodec, moveStateCodec),
 ]);
 // The global pause, folded from the journal before any instance can act (a recovered
 // notice is resent through the actuator too).
@@ -208,6 +215,9 @@ const pause = createPauseControl({ runtime, journal, actuator });
 if (pause.state().paused) log("warning", `all heuristics paused (by ${pause.state().by ?? "?"}): only guards act until resumed`);
 heuristics.attach(journal, onPersisted);
 log("info", `journal open at ${journalPath} (globalSeq ${journal.lastGlobalSeq()})`);
+const recordMove = createMoveJournal(runtime);
+const importedFrom = importedEvent(moved);
+if (importedFrom !== undefined) await recordMove(importedFrom).catch((err) => log("error", `move: the import is done, but not journaled: ${String(err)}`));
 
 // 5a. Self-monitoring: problems and an optional daily summary in the Telegram chat, in
 // the house's time zone (HA's arrives on connect, step 8).
@@ -604,6 +614,18 @@ const server = startServer(
     record: createHouseRecord({ scope, signals: signalStore, journal, users, instances: () => heuristics.instances(), facts: () => heuristics.facts(), house: houseFacts }),
     mcp: (app) => mcp.mountIngress(app),
     connect: { mode: config.mode, tokens: agentTokens, port: agentPortInfo, log },
+    move: {
+      mode: config.mode,
+      dataDir: config.dataDir,
+      configDir: config.configDir,
+      journal: journal.db,
+      signals: signalStore.db,
+      version,
+      journalReader: journal,
+      record: recordMove,
+      atStart: moved,
+      log,
+    },
     panelDistDir: join(packageRoot, "panel-dist"),
   },
   8099,

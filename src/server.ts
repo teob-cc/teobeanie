@@ -20,6 +20,7 @@ import { mountTimeline, type HouseRecord } from "./mcp/timeline.js";
 import { mountInstanceMode } from "./working-set.js";
 import { mountInstances } from "./instances.js";
 import { mountConnect, type ConnectDeps } from "./connect.js";
+import { mountMove, type MoveDeps } from "./move.js";
 import type { PackageInfo } from "./packages/library.js";
 import type { AnyHeuristic, CommandSource } from "./kernel/heuristic.js";
 import type { JournalReader } from "@lambda-house/teob-ts/core";
@@ -70,6 +71,8 @@ export interface ServerDeps {
   mcp?: (app: Hono) => void;
   /** The Connect page: agent tokens and the agent port (api/connect, api/agent-tokens). */
   connect?: ConnectDeps;
+  /** Moving the install: api/move (the exports, what the start imported) and api/move/export. */
+  move?: MoveDeps;
   panelDistDir: string;
 }
 
@@ -122,6 +125,7 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
   if (deps.record !== undefined) mountTimeline(app, deps.record);
   deps.mcp?.(app);
   if (deps.connect !== undefined) mountConnect(app, deps.connect);
+  if (deps.move !== undefined) mountMove(app, deps.move);
 
   app.all("/api/*", async (c) => (await deps.readApi.handle(c.req.raw)) ?? c.json({ error: "NotFound" }, 404));
 
