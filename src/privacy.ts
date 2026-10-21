@@ -61,7 +61,7 @@ const PLACEHOLDER_OBJECT_IDS = new Set<string>([
   "den_pm10", "den_pm25", "den_reading", "den_room_temperature", "den_speaker", "den_spot",
   "den_temperature", "den_tv", "den_unit", "diag", "dishwasher_power", "domain", "door",
   "doorstep_motion", "dupe", "e_motion", "eid", "electricity_price", "energy_price", "entity",
-  "espresso", "example", "extra", "fridge_door", "fridge_power", "front", "front_door",
+  "example", "extra", "fridge_door", "fridge_power", "front", "front_door",
   "front_door_contact", "front_outside", "garage", "garage_door", "garage_door_contact", "garage_l1",
   "garage_l2", "garage_occupancy", "garage_opener_relay", "garden", "garden_lights", "garden_lux",
   "garden_temperature", "gas_meter", "gas_price", "gas_total", "gate", "gate_relay",

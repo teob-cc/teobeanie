@@ -2,7 +2,7 @@
   "name": "teobeanie",
   "description": "Skills for Teobeanie, the Home Assistant add-on that runs behaviours as tested pure functions with a journal of every decision.",
   "owner": {
-    "name": "Tim Evdokimov",
+    "name": "teob-cc",
     "url": "https://github.com/teob-cc"
   },
   "plugins": [

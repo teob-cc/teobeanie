@@ -7,19 +7,19 @@ describe("button", () => {
   const remote: ButtonParams = {
     mqtt: { topic: "zigbee2mqtt/Remote" },
     presses: [
-      { action: "on", set: [{ entity: "switch.espresso", to: "on" }] },
-      { action: "off", set: [{ entity: "switch.espresso", to: "off" }] },
+      { action: "on", set: [{ entity: "switch.coffee_machine", to: "on" }] },
+      { action: "off", set: [{ entity: "switch.coffee_machine", to: "off" }] },
     ],
-    uses: ["switch.espresso"],
+    uses: ["switch.coffee_machine"],
   };
   const mqtt = (payload: unknown) => ({ trigger: { platform: "mqtt", topic: "zigbee2mqtt/Remote", payload_json: payload } });
 
   it("an MQTT action sets the target; battery reports on the same topic are not presses", () => {
     expect(button.triggers!(remote)).toEqual({ mqtt: { platform: "mqtt", topic: "zigbee2mqtt/Remote" } });
-    const sim = simulate(button, remote, { "switch.espresso": "off" });
+    const sim = simulate(button, remote, { "switch.coffee_machine": "off" });
     sim.trigger("mqtt", mqtt({ action: "on", battery: 100 })).trigger("mqtt", mqtt({ battery: 99, linkquality: 120 }));
     sim.trigger("mqtt", mqtt({ action: "off" })).trigger("mqtt", mqtt({ action: "brightness_move_up" }));
-    expect(sim.calls()).toEqual(["switch.turn_on switch.espresso", "switch.turn_off switch.espresso"]);
+    expect(sim.calls()).toEqual(["switch.turn_on switch.coffee_machine", "switch.turn_off switch.coffee_machine"]);
     expect(sim.whys().at(-1)).toBe("zigbee2mqtt/Remote brightness_move_up: nothing to do for this press");
   });
 
