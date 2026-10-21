@@ -10,6 +10,7 @@ import { simulate } from "../src/kernel/simulate.js";
 import { STARTER as LIBRARY } from "./starter.js";
 import { loadHouseConfig } from "../src/tiles.js";
 import { loadAllowlist } from "../src/allowlist.js";
+import { loadLibrary } from "../src/packages/library.js";
 
 const root = join(import.meta.dirname, "..");
 const noLog = (): void => {};
@@ -95,6 +96,18 @@ describe("examples/", () => {
     ]);
     sim.set("binary_sensor.hallway_motion", "off").advance(minutes(5));
     expect(sim.calls().at(-1)).toBe("light.turn_off light.hallway");
+  });
+
+  it("rules: the facts example loads, one fact reading the other", async () => {
+    const lib = await loadLibrary(join(root, "examples", "rules"), noLog);
+    expect(lib.facts.map((f) => f.id)).toEqual(["hallway-quiet", "heating-unattended"]);
+    expect(lib.factSources.get("hallway-quiet")?.binding).toBe("hallwayQuiet");
+    const [quiet, unattended] = lib.facts;
+    const sim = simulate(unattended!, undefined, { "binary_sensor.hallway_motion": "on", "binary_sensor.boiler_heating": "on" }, { facts: [quiet!] });
+    sim.set("binary_sensor.hallway_motion", "off").advance(minutes(15));
+    expect(sim.fact("heating-unattended")).toEqual({ value: true, since: sim.now });
+    sim.set("binary_sensor.boiler_heating", "off");
+    expect(sim.fact("heating-unattended")?.value).toBe(false);
   });
 
   it("a broken custom file is skipped and logged, not fatal", async () => {

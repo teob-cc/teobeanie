@@ -68,6 +68,6 @@ export {
   type Want,
   type World,
 } from "./kernel/rule.js";
-export { fact, type AnyFact, type FactDef, type FactOptions, type FactValueIn } from "./kernel/fact.js";
+export { fact, type AnyFact, type FactDef, type FactOptions, type FactValue } from "./kernel/fact.js";
 export { houseZone, localInstant, localMinutes, localTimeOn, nextLocalTime, parseHhMm } from "./kernel/clock.js";
 export { checkParams, describeParams, param, validateParams, type Infer, type ParamField, type ParamSpec, type Schema } from "./kernel/params.js";

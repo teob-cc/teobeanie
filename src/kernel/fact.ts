@@ -71,16 +71,10 @@ export interface FactDef<Id extends string = string, T = Json> {
 export type AnyFact = FactDef<string, any>;
 
 /**
- * The type of a fact's value, from the module that defines it: the generated ha.d.ts
- * types ha.facts and ctx.fact with it (`FactValueIn<typeof import("./x"), "my-fact">`).
+ * The type of a fact's value, from its definition: the generated ha.d.ts types
+ * ha.facts and ctx.fact with it (`FactValue<typeof import("./x").quiet>`).
  */
-export type FactValueIn<M, Id extends string> = FactsOf<M extends { default: infer D } ? D : M> extends infer F
-  ? F extends { readonly kind: "fact"; readonly id: Id; readonly valueType?: infer V }
-    ? Exclude<V, undefined>
-    : never
-  : never;
-type FactsOf<D> = D extends (...args: never[]) => infer R ? Members<R> : Members<D>;
-type Members<D> = D extends ReadonlyArray<infer X> ? X : D;
+export type FactValue<F> = F extends { readonly kind: "fact"; readonly valueType?: infer V } ? Exclude<V, undefined> : Json;
 
 /** JSON-safe: undefined and non-finite numbers become null. */
 function toJson(v: unknown): Json {

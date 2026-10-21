@@ -144,6 +144,7 @@ const loadedLibrary = await loadLibrary(config.configDir, haLog);
 let library = loadedLibrary.heuristics;
 let packages: PackageInfo[] = loadedLibrary.packages;
 // The facts (derived state, kernel/fact.ts) and the files they come from.
+let libraryFacts = loadedLibrary.facts;
 let factSources = loadedLibrary.factSources;
 // The House view (step 9b) follows the instances' cards and the facts; it exists only after the host.
 let cardsChanged = (): void => {};
@@ -433,6 +434,7 @@ const reloader = createReloader({
         allowlist = next.allowlist;
         library = next.library;
         packages = next.packages;
+        libraryFacts = next.facts;
         factSources = next.factSources;
         ({ tiles, groups } = next);
         checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
@@ -502,7 +504,14 @@ const server = startServer(
     facts: () => heuristics.facts(),
     house,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
-    studio: { configDir: config.configDir, mode: config.mode, liveStates: () => bridge.liveCache().values(), scope, packages: () => packages },
+    studio: {
+      configDir: config.configDir,
+      mode: config.mode,
+      liveStates: () => bridge.liveCache().values(),
+      scope,
+      packages: () => packages,
+      facts: () => libraryFacts.map((f) => ({ id: f.id, title: f.title, ...factSources.get(f.id) })),
+    },
     reload: reloader,
     library: { current: () => library, packages: () => packages },
     pause,

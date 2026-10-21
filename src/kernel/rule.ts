@@ -800,7 +800,7 @@ export function rule<P = void>(id: string, fn: RuleFn<P>, opts: RuleOptions<P> =
     decide(recovered: RuleState, input, ctx: DecideCtx<P>): Decision<RuleEvent> | undefined {
       if (input.kind === "outcome") return undefined;
       const state = asRuleState(recovered);
-      const { result, scope: s } = evaluate(ctx.params, ctx.now, (e) => ctx.get(e), state.track, ctx.house, (name) => ctx.fact?.(name));
+      const { result, scope: s } = evaluate(ctx.params, ctx.now, (e) => ctx.get(e), state.track, ctx.house, (name) => (ctx.fact as (n: string) => FactReading | undefined)(name));
       const enforce = enforcing(ctx.params);
 
       const events: RuleEvent[] = [];

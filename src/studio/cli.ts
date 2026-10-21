@@ -3,7 +3,8 @@
 //   HA_URL=http://homeassistant.local:8123 HA_TOKEN=... node dist/studio/cli.js types <config folder>
 //
 // writes <config folder>/heuristics/ha.d.ts (the house: the entities in its
-// allowlist.json scope, or every entity without one), <config folder>/.teob/ (the
+// allowlist.json scope, or every entity without one, and the facts its packages and
+// files define, each typed from its module), <config folder>/.teob/ (the
 // "teobeanie" module's declarations, and heuristics.schema.json: heuristics.json as a JSON
 // Schema built from the heuristics' parameter schemas, for an editor to check the instances
 // with: "$schema": "./.teob/heuristics.schema.json") and, when absent, a tsconfig.json, so
@@ -38,7 +39,7 @@ import { loadInstances } from "../kernel/host.js";
 import { validateParams } from "../kernel/params.js";
 import { compare, fmtAt, formatParity, houseChanges, replay, type Recorded } from "../replay.js";
 import { heuristicsJsonSchema } from "./config-schema.js";
-import { generateHouseTypes } from "./house-types.js";
+import { factModule, generateHouseTypes } from "./house-types.js";
 import { initWorkingSet } from "./init.js";
 import { CONFIG_TSCONFIG, toolkitTypes } from "./toolkit-types.js";
 
@@ -99,7 +100,15 @@ async function types(dir: string): Promise<void> {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, text);
   };
-  write(join(dir, "heuristics", "ha.d.ts"), generateHouseTypes(states, { at: Date.now(), operable: scope?.operated ?? [] }));
+  // The folder's packages, the starter ones it does not have yet, and its own files: their
+  // facts are typed in ha.d.ts, their heuristics' params in heuristics.schema.json.
+  const lib = await loadLibrary(dir, (_l, m) => console.error(m), undefined, { withStarter: true });
+  const facts = lib.facts.map((f) => {
+    const src = lib.factSources.get(f.id);
+    const module = src === undefined ? undefined : factModule(join(dir, "heuristics"), src.file);
+    return { id: f.id, title: f.title, ...(module !== undefined ? { module } : {}), ...(src?.binding !== undefined ? { binding: src.binding } : {}) };
+  });
+  write(join(dir, "heuristics", "ha.d.ts"), generateHouseTypes(states, { at: Date.now(), operable: scope?.operated ?? [], facts }));
   const toolkit = toolkitTypes();
   if (toolkit === undefined) {
     console.error("no emitted declarations next to the toolkit: build first (pnpm build)");
@@ -107,12 +116,10 @@ async function types(dir: string): Promise<void> {
   }
   for (const [file, text] of Object.entries(toolkit)) write(join(dir, ".teob", file), text);
   // heuristics.json's instances, checked by an editor as the loader checks them.
-  // The folder's packages, the starter ones it does not have yet, and its own files.
-  const library = (await loadLibrary(dir, (_l, m) => console.error(m), undefined, { withStarter: true })).heuristics;
-  write(join(dir, ".teob", "heuristics.schema.json"), `${JSON.stringify(heuristicsJsonSchema(library), null, 2)}\n`);
+  write(join(dir, ".teob", "heuristics.schema.json"), `${JSON.stringify(heuristicsJsonSchema(lib.heuristics), null, 2)}\n`);
   const tsconfig = join(dir, "tsconfig.json");
   if (!existsSync(tsconfig)) write(tsconfig, `${JSON.stringify(CONFIG_TSCONFIG, null, 2)}\n`);
-  console.log(`wrote ${states.length} entities (${scope?.operated.length ?? 0} operable) to ${join(dir, "heuristics", "ha.d.ts")}, the "teobeanie" module and heuristics.schema.json to ${join(dir, ".teob")}/`);
+  console.log(`wrote ${states.length} entities (${scope?.operated.length ?? 0} operable) and ${facts.length} facts to ${join(dir, "heuristics", "ha.d.ts")}, the "teobeanie" module and heuristics.schema.json to ${join(dir, ".teob")}/`);
 }
 
 async function replayCommand(dir: string, args: string[]): Promise<void> {

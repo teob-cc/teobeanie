@@ -222,7 +222,7 @@ describe("house tools", () => {
       heuristics: ["door-nag", "sustained-notice"],
       files: ["door-nag.ts", "door-watch.test.ts", "sustained-notice.ts"],
     });
-    expect(list.config_folder).toEqual(["hallway-light.ts", "pump-run-on.ts"]);
+    expect(list.config_folder).toEqual(["hallway-light.ts", "house-facts.ts", "pump-run-on.ts"]);
     const notice = (await call("heuristic_source", { name: "sustained-notice" })) as Record<string, unknown>;
     expect(notice).toMatchObject({ name: "door-watch/sustained-notice.ts", package: "door-watch", origin: "starter", modified: false, built_in: true, defines: ["sustained-notice"] });
     expect(notice["source"]).toMatch(/id: "sustained-notice"/);

@@ -169,7 +169,8 @@ export default [
     const lib = await loadLibrary(dir, () => {});
     expect(lib.facts.map((f) => [f.id, f.title])).toEqual([["shed-empty", "Shed empty"]]);
     expect(lib.heuristics.map((h) => [h.id, h.facts?.(undefined)])).toEqual([["shed-light", ["shedEmpty"]]]);
-    expect(lib.factSources.get("shed-empty")?.file).toBe(join(dir, "heuristics", "shed.ts"));
+    // Only in the array: no binding to type it by.
+    expect(lib.factSources.get("shed-empty")).toEqual({ file: join(dir, "heuristics", "shed.ts") });
   });
 
   it("a package names its facts in teobeanie.json; one it does not name is refused", async () => {
@@ -177,6 +178,7 @@ export default [
     const lib = await loadLibrary(ok, () => {});
     expect(lib.facts.map((f) => f.id)).toEqual(["shed-busy"]);
     expect(lib.packages[0]).toMatchObject({ name: "shed", facts: ["shed-busy"], factSources: { "shed-busy": "busy.ts" } });
+    expect(lib.factSources.get("shed-busy")).toMatchObject({ package: "shed", binding: "default" });
     const failures: string[] = [];
     await loadLibrary(folder({ "packages/shed/teobeanie.json": manifest({ "shed-idle": {} }), "packages/shed/busy.ts": factFile }), () => {}, failures);
     expect(failures).toEqual([

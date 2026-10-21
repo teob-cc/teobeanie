@@ -58,11 +58,13 @@ export interface PackageInfo {
   manifest: Manifest;
 }
 
-/** Where a heuristic came from. */
+/** Where a heuristic (or a fact) came from. */
 export interface HeuristicSource {
   file: string;
   /** Its package's name; absent: a file in heuristics/. */
   package?: string;
+  /** A fact's export: its name in the module, or "default" (custom.ts LoadedFact.binding). */
+  binding?: string;
 }
 
 export interface Library {
@@ -209,7 +211,7 @@ export async function loadLibrary(
       for (const l of ownFacts) {
         factsTaken.add(l.fact.id);
         facts.push(l.fact);
-        factSources.set(l.fact.id, { file: l.file, package: name });
+        factSources.set(l.fact.id, { file: l.file, package: name, ...(l.binding !== undefined ? { binding: l.binding } : {}) });
       }
       packages.push({
         name,
@@ -241,7 +243,7 @@ export async function loadLibrary(
   }
   for (const l of ownFacts) {
     facts.push(l.fact);
-    factSources.set(l.fact.id, { file: l.file });
+    factSources.set(l.fact.id, { file: l.file, ...(l.binding !== undefined ? { binding: l.binding } : {}) });
   }
   return { heuristics, packages, sources, facts, factSources };
 }

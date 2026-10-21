@@ -95,6 +95,11 @@ export interface Loaded {
 export interface LoadedFact {
   fact: AnyFact;
   file: string;
+  /**
+   * How the module exports it, for the typings: by a name (`export const quiet = fact(…)`),
+   * or as the module's default export itself. None: only inside an array (or a function).
+   */
+  binding?: string;
 }
 
 /** Where loadModules collects the facts: the ids taken so far (added to), and the list. */
@@ -109,7 +114,7 @@ export interface FactSink {
  * imported under a new URL. A file of a package is imported afresh whenever any file
  * of the package changed; a module a heuristics/ file imports stays as first loaded.
  */
-const loaded = new Map<string, { hash: string; exported: unknown }>();
+const loaded = new Map<string, { hash: string; exported: unknown; bindings: Map<unknown, string> }>();
 
 const digest = (text: string | Buffer): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
@@ -128,10 +133,15 @@ export async function loadModules(modules: SourceModule[], taken: Set<string>, l
       const hash = m.version === undefined ? own : digest(`${m.version}:${own}`);
       const cached = loaded.get(m.file)?.hash === hash;
       let exported = cached ? loaded.get(m.file)!.exported : undefined;
+      let bindings = cached ? loaded.get(m.file)!.bindings : new Map<unknown, string>();
       if (!cached) {
-        const mod = (await import(`${pathToFileURL(m.file).href}?v=${hash}`)) as { default?: unknown };
+        const mod = (await import(`${pathToFileURL(m.file).href}?v=${hash}`)) as { default?: unknown } & Record<string, unknown>;
         exported = typeof mod.default === "function" ? (mod.default as (t: Toolkit) => unknown)(TOOLKIT) : mod.default;
-        loaded.set(m.file, { hash, exported });
+        // A fact exported by name (or as the default itself) can be typed from its binding.
+        bindings = new Map();
+        for (const [name, v] of Object.entries(mod)) if (name !== "default" && isFact(v) && !bindings.has(v)) bindings.set(v, name);
+        if (isFact(mod.default) && !bindings.has(mod.default)) bindings.set(mod.default, "default");
+        loaded.set(m.file, { hash, exported, bindings });
       }
       const items = Array.isArray(exported) ? exported : [exported];
       // Facts: collected where the caller takes them, else left alone.
@@ -155,7 +165,8 @@ export async function loadModules(modules: SourceModule[], taken: Set<string>, l
       if (facts !== undefined) {
         for (const f of factDefs) {
           facts.taken.add(f.id);
-          facts.out.push({ fact: f, file: m.file });
+          const binding = bindings.get(f);
+          facts.out.push({ fact: f, file: m.file, ...(binding !== undefined ? { binding } : {}) });
         }
       }
       if (!cached) log("info", `${m.label}: ${[...defs.map((d) => d.id), ...factDefs.map((f) => `fact ${f.id}`)].join(", ")}`);

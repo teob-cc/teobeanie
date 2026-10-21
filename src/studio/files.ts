@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import type { HaEntityState } from "@lambda-house/teob-ts/ha";
 import type { HouseScope } from "../allowlist.js";
-import { generateHouseTypes } from "./house-types.js";
+import { factModule, generateHouseTypes } from "./house-types.js";
 import { toolkitTypes } from "./toolkit-types.js";
 import type { PackageInfo } from "../packages/library.js";
 
@@ -31,6 +31,8 @@ export interface StudioDeps {
   scope: HouseScope;
   /** The packages the running set was loaded with (packages/ in the config folder), shown read-only. */
   packages?: () => PackageInfo[];
+  /** The facts the library defines, with the file of each: typed in the editor's ha.d.ts. */
+  facts?: () => Array<{ id: string; title: string; file?: string; binding?: string }>;
 }
 
 /** A package as the Studio lists it. */
@@ -133,7 +135,15 @@ export function mountStudio(app: Hono, deps: StudioDeps): void {
       toolkit: toolkitTypes() ?? null,
       house: generateHouseTypes(
         [...deps.liveStates()].filter((s) => deps.scope.observes(s.entity_id)),
-        { at: Date.now(), operable: deps.scope.operated },
+        {
+          at: Date.now(),
+          operable: deps.scope.operated,
+          // The editor's ha.d.ts sits at the root, the files under heuristics/ and packages/ as in the folder.
+          facts: (deps.facts?.() ?? []).map((f) => {
+            const module = f.file === undefined ? undefined : factModule(deps.configDir, f.file);
+            return { id: f.id, title: f.title, ...(module !== undefined ? { module } : {}), ...(f.binding !== undefined ? { binding: f.binding } : {}) };
+          }),
+        },
       ),
       scope: { observed: deps.scope.observed.length, operated: deps.scope.operated.length },
     }),
