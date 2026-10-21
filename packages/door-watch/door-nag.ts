@@ -1,5 +1,7 @@
 // door-nag — while a door stays open, send a reminder every N minutes; optionally
-// stay quiet while someone is around.
+// stay quiet while someone is around: an entity that is on (quietWhileOn), or a fact
+// that is not true (onlyWhileFact: "nobody moving nearby", derived once in a fact
+// rather than again here).
 
 import { cancelTimer, defineHeuristic, heldSince, minutes, notify, param, setTimer, type Infer } from "teobeanie";
 
@@ -8,6 +10,10 @@ const DOOR_NAG_PARAMS = param.object({
   everyMin: param.duration("min", { positive: true }).doc("Minutes between reminders, the first one after the door opened."),
   text: param.text().doc("The reminder."),
   quietWhileOn: param.entity().optional().doc("Skip a reminder (but keep counting) while this entity is on."),
+  onlyWhileFact: param
+    .string()
+    .optional()
+    .doc("A fact id (nobody-near-garage): remind only while this fact is true; a skipped reminder keeps the count."),
 });
 
 export type DoorNagParams = Infer<typeof DOOR_NAG_PARAMS>;
@@ -34,6 +40,7 @@ export const doorNag = defineHeuristic<DoorNagParams, State, Event>({
   params: DOOR_NAG_PARAMS,
   watch: (p) => [p.door],
   reads: (p) => (p.quietWhileOn ? [p.quietWhileOn] : []),
+  facts: (p) => (p.onlyWhileFact ? [p.onlyWhileFact] : []),
   actuates: () => [],
   notifyPerHour: 60,
   initial: () => ({ openSince: null, nags: 0 }),
@@ -85,6 +92,10 @@ export const doorNag = defineHeuristic<DoorNagParams, State, Event>({
         if (ctx.value(p.door) !== true) return { why: `${p.door} no longer open` };
         if (p.quietWhileOn && ctx.value(p.quietWhileOn) === true) {
           return { why: `${p.quietWhileOn} on, staying quiet`, timers: [arm()] };
+        }
+        if (p.onlyWhileFact) {
+          const f = ctx.fact(p.onlyWhileFact);
+          if (f?.value !== true) return { why: `${p.onlyWhileFact} ${f === undefined ? "unknown" : "not true"}, staying quiet`, timers: [arm()] };
         }
         const openMin = Math.round((ctx.now - (state.openSince ?? ctx.now)) / 60_000);
         return {

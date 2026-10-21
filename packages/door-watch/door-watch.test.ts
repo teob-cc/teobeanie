@@ -1,7 +1,7 @@
 // door-watch: door-nag reminders and the sustained-presence notice.
 
 import { describe, expect, it, simulate } from "teobeanie/test";
-import { minutes } from "teobeanie";
+import { fact, minutes } from "teobeanie";
 import { doorNag, type DoorNagParams } from "./door-nag.ts";
 import { sustainedNotice } from "./sustained-notice.ts";
 
@@ -23,6 +23,26 @@ describe("door-nag", () => {
     expect(sim.calls()).toHaveLength(2);
     expect(sim.journal.find((j) => j.event.tag === "Closed")?.event).toMatchObject({ openMin: 15, nags: 2 });
     expect(sim.timers).toEqual({});
+  });
+
+  it("reminds only while a fact holds: nobody moving near the garage for 5 min", () => {
+    const nobodyNear = fact("nobody-near-garage", ({ ha, held }) => held(() => ha.binary_sensor.garage_motion.is("off"), minutes(5)));
+    const p: DoorNagParams = { door: "binary_sensor.garage_door", everyMin: 3, text: "Garage door is still open, but no one in the garage!", onlyWhileFact: "nobody-near-garage" };
+    const sim = simulate(doorNag, p, { "binary_sensor.garage_door": "off", "binary_sensor.garage_motion": "on" }, { facts: [nobodyNear] });
+    sim.set("binary_sensor.garage_door", "on").advance(minutes(3));
+    expect(sim.calls()).toEqual([]); // someone moving about
+    expect(sim.whys().at(-1)).toBe("nobody-near-garage not true, staying quiet");
+    sim.set("binary_sensor.garage_motion", "off").advance(minutes(5)); // the reminder at 6 min: motion stopped 3 min ago
+    expect(sim.calls()).toEqual([]);
+    sim.advance(minutes(3)); // 9 min: nobody near for 6 min
+    expect(sim.calls()).toEqual([`notify: ${p.text}`]);
+    expect(sim.journal.find((j) => j.event.tag === "Nagged")?.event).toMatchObject({ n: 1, openMin: 9 });
+    expect(sim.fact("nobody-near-garage")).toEqual({ value: true, since: sim.now - minutes(3) });
+  });
+
+  it("without the fact defined, the instance cannot run", () => {
+    const p: DoorNagParams = { door: "binary_sensor.garage_door", everyMin: 3, text: "open", onlyWhileFact: "nobody-near-garage" };
+    expect(() => simulate(doorNag, p, {})).toThrow(/reads fact nobody-near-garage/);
   });
 
   it("arms on start when the door is already open", () => {

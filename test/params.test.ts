@@ -169,6 +169,7 @@ describe("describeParams", () => {
       { name: "everyMin", kind: "duration", required: true, unit: "min", positive: true, doc: "Minutes between reminders, the first one after the door opened." },
       { name: "text", kind: "text", required: true, doc: "The reminder." },
       { name: "quietWhileOn", kind: "entity", required: false, doc: "Skip a reminder (but keep counting) while this entity is on." },
+      { name: "onlyWhileFact", kind: "string", required: false, doc: "A fact id (nobody-near-garage): remind only while this fact is true; a skipped reminder keeps the count." },
     ]);
     const garage = describeParams(byId("garage-door"))!;
     expect(garage.find((f) => f.name === "button")).toMatchObject({ kind: "entity", domains: ["switch"] });
