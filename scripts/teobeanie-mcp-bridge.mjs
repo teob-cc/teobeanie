@@ -117,8 +117,10 @@ async function forward(message, retry = true) {
     if (message.method === "tools/call") headers["mcp-name"] = message.params?.name;
   }
   const res = await fetch(`${base}mcp`, { method: "POST", headers, body: JSON.stringify(message) });
-  if ((res.status === 401 || res.status === 404) && retry) {
+  if ((res.status === 401 || res.status === 404 || res.status === 502 || res.status === 503) && retry) {
     session = undefined; // expired session: open a new one once
+    // The add-on may be gone or replaced (a move to another install): look it up again.
+    if (!process.env.ADDON && res.status !== 401) addon = base = undefined;
     return forward(message, false);
   }
   if (res.status === 202) return undefined;
