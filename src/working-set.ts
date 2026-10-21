@@ -1,7 +1,7 @@
 // working-set.ts — the working set's edits, journaled. Every change to the config folder
 // that a reload applies (from the panel, the file watch or the CLI) is one
-// ConfigChanged in a stream of its own: which files, who, and what it changed for
-// which instances, so the timeline shows it between the decisions before and after it
+// ConfigChanged in a stream of its own: which files, who, what it changed for which
+// instances, and the revision it makes (revisions.ts), so the timeline shows it between the decisions before and after it
 // and the agent can explain a change in behaviour. A rejected reload changes nothing
 // and journals nothing; the panel and the log show why.
 //
@@ -52,6 +52,14 @@ export interface ConfigChanged {
    * instance (the scope changed), and on rows from before the field: those are global.
    */
   instances?: string[];
+  /**
+   * Its revision (revisions.ts): the working set after it is revision n, whose parent is
+   * the one before. Absent on rows from before revisions.
+   */
+  revision?: number;
+  parent?: number;
+  /** The whole working set after it: path → content hash ("sha256-…"), the files under /data/revisions. */
+  files?: Record<string, string>;
 }
 
 export type ConfigChange = Omit<ConfigChanged, "tag">;
@@ -458,6 +466,25 @@ export function replaceInstance(text: string, key: string, fields: Partial<Pick<
   let out = want.mode !== undefined && current.mode === undefined ? setInstanceMode(text, key, want.mode as Mode) : text;
   for (const f of INSTANCE_FIELDS) out = patch(out, key, [f], want[f]);
   return out;
+}
+
+/**
+ * heuristics.json's text with a twin promoted: the original's instance removed, and the
+ * twin in its place, under the original's id and mode, its own heuristic and params
+ * kept and its "twinOf" gone. One edit, so it is one revision.
+ */
+export function promoteTwinText(text: string, twinKey: string): { text: string; original: string; promoted: string } {
+  const twin = readInstance(text, twinKey);
+  if (twin === undefined) throw new Error(`heuristics.json: no instance ${twinKey}`);
+  if (typeof twin.twinOf !== "string") throw new Error(`${twinKey} is not a twin (it has no "twinOf")`);
+  const original = readInstance(text, twin.twinOf);
+  if (original === undefined) throw new Error(`heuristics.json: no instance ${twin.twinOf}, the original of ${twinKey}`);
+  const promoted = `${twin.heuristic}/${original.id}`;
+  let out = removeInstance(text, twin.twinOf);
+  out = patch(out, twinKey, ["id"], original.id);
+  out = setInstanceMode(out, promoted, original.mode ?? "shadow");
+  out = patch(out, promoted, ["twinOf"], undefined);
+  return { text: out, original: twin.twinOf, promoted };
 }
 
 /**

@@ -20,6 +20,9 @@ import { mountInstanceMode } from "./working-set.js";
 import { mountInstances } from "./instances.js";
 import type { PackageInfo } from "./packages/library.js";
 import type { AnyHeuristic, CommandSource } from "./kernel/heuristic.js";
+import type { JournalReader } from "@lambda-house/teob-ts/core";
+import { mountRevisions, type RevisionStore } from "./revisions.js";
+import { mountTwins } from "./twins.js";
 
 export interface HealthReport {
   status: "ok" | "degraded";
@@ -55,6 +58,10 @@ export interface ServerDeps {
   record?: HouseRecord;
   /** Logs what the panel's commands reached. */
   log?: (level: "info", msg: string) => void;
+  /** The working set's revisions: api/revisions (list, files, diff, rollback). */
+  revisions?: RevisionStore;
+  /** The journal the twins are compared in: api/twins (differences, promote). */
+  twins?: Pick<JournalReader, "queryEvents">;
   /** Mounts the MCP endpoint (/mcp). */
   mcp?: (app: Hono) => void;
   panelDistDir: string;
@@ -98,6 +105,8 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
       const { mode, configDir, scope, liveStates } = deps.studio;
       mountInstances(app, { mode, configDir, scope, liveStates, reloader: deps.reload, library: deps.library.current, packages: deps.library.packages });
     }
+    if (deps.revisions !== undefined) mountRevisions(app, { mode: deps.studio.mode, store: deps.revisions, reloader: deps.reload });
+    if (deps.twins !== undefined) mountTwins(app, { mode: deps.studio.mode, journal: deps.twins, instances: deps.heuristics, reloader: deps.reload });
   }
   if (deps.pause !== undefined) mountPause(app, { mode: deps.studio.mode, pause: deps.pause });
   if (deps.command !== undefined) mountCommand(app, { mode: deps.studio.mode, command: deps.command, ...(deps.log !== undefined ? { log: deps.log } : {}) });

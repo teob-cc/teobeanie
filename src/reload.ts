@@ -1,15 +1,17 @@
-// reload.ts — config changes without an add-on restart. heuristics.json, allowlist.json
-// and tiles.json are read again when one of them changes in the config folder (1 s
-// after the last change) or on POST api/reload; custom heuristics/ files are read
-// with them. The whole config is validated first and applied only when all of it is
+// reload.ts — config changes without an add-on restart. The working set is read again
+// when one of its files changes in the config folder (heuristics.json, allowlist.json,
+// tiles.json, the lock, anything under heuristics/ or packages/; 1 s after the last
+// change) or on POST api/reload. The whole config is validated first and applied only when all of it is
 // valid: the scope, the routing, the House view and the heuristic instances, of
 // which only the added and changed ones start. An invalid config is rejected with
 // its reason, and the running set stays exactly as it was.
 //
 // A reload that changed something is journaled as a ConfigChanged (working-set.ts) with
-// who did it: the file watch, the panel's HA user, the CLI. The panel's own edits
-// (an instance's mode, whole instances) write the file, reload and journal in one
-// step (`Reloader.edit`), and put the file back when the reload rejects it.
+// who did it: the file watch, the panel's HA user, the CLI. With a revision store it is
+// also the working set's next revision (revisions.ts). The panel's own edits (an
+// instance's mode, whole instances, a rollback, a promote) write the files, reload and
+// journal in one step (`Reloader.write`), and put the files back when the reload
+// rejects them.
 
 import { existsSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,9 +25,14 @@ import type { AnyHeuristic } from "./kernel/heuristic.js";
 import { mayWrite } from "./studio/files.js";
 import { requestUser } from "./pause.js";
 import { changedFiles, configFingerprint, describeChanges, type ConfigChange } from "./working-set.js";
+import { LOCK_FILE } from "./packages/lock.js";
+import { inWorkingSet, type RevisionStore } from "./revisions.js";
 
-/** The files a change of which reloads the config. */
+/** The config files the panel edits as text. */
 export const CONFIG_FILES = ["heuristics.json", "allowlist.json", "tiles.json"];
+
+/** The top-level files whose digest says whether a reload changed a file (with heuristics/ and packages/). */
+const FINGERPRINT_FILES = [...CONFIG_FILES, LOCK_FILE];
 
 /** The add-on log convention: debug | info | warning | error. */
 type Log = (level: string, msg: string) => void;
@@ -119,6 +126,20 @@ export interface ConfigEdit {
   summary?: string;
 }
 
+/**
+ * A change to any working-set files, applied through the reload path. `apply` writes
+ * them and returns how to put them back; it throws to refuse, having written nothing.
+ */
+export interface ConfigWrite {
+  /** Who: the panel's HA user (requestUser), "cli", an agent. */
+  by: string;
+  /** What the person did, when the reload's diff says it less well; else the diff's lines. */
+  summary?: string;
+  /** Journal it (a revision) even when no file or instance changed: a rollback is always one. */
+  always?: boolean;
+  apply: () => () => void;
+}
+
 export interface Reloader {
   /** Reload now; reloads run one at a time, in order. */
   reload(source: ReloadOutcome["source"], opts?: { by?: string }): Promise<ReloadOutcome>;
@@ -128,6 +149,8 @@ export interface Reloader {
    * and nothing journaled (the outcome says why). Throws when `change` refuses.
    */
   edit(edit: ConfigEdit): Promise<ReloadOutcome>;
+  /** The same for any working-set files: `apply` writes them, and its result puts them back on a rejection. */
+  write(write: ConfigWrite): Promise<ReloadOutcome>;
   /** The latest reload since boot, if any. */
   last(): ReloadOutcome | undefined;
 }
@@ -143,30 +166,41 @@ export function createReloader(opts: {
   instances?: () => InstanceInfo[];
   /** Journal a reload that changed something (working-set.ts createConfigJournal). */
   record?: (change: ConfigChange) => Promise<void>;
+  /** Each journaled change is the working set's next revision, its files stored here. */
+  revisions?: RevisionStore;
   now?: () => number;
 }): Reloader {
   const now = opts.now ?? Date.now;
-  const files = (): Map<string, string> => (opts.configDir !== undefined ? configFingerprint(opts.configDir, CONFIG_FILES) : new Map());
+  const files = (): Map<string, string> => (opts.configDir !== undefined ? configFingerprint(opts.configDir, FINGERPRINT_FILES) : new Map());
   let chain: Promise<unknown> = Promise.resolve();
   let last: ReloadOutcome | undefined;
   // What the running set was read from: boot read it just before.
   let applied = files();
 
-  /** The ConfigChanged of an applied reload, when it changed a file or an instance. */
-  const journal = async (changes: ReloadChanges, touched: string[], before: InstanceInfo[], at: number, by: string, summary?: string): Promise<ConfigChange | undefined> => {
+  /**
+   * The ConfigChanged of an applied reload, when it changed a file or an instance (or
+   * `always`). With revisions, a file that changed at all (a test, a README, a re-indent)
+   * counts too, and the change carries the new revision.
+   */
+  const journal = async (changes: ReloadChanges, touched: string[], before: InstanceInfo[], at: number, by: string, summary?: string, always = false): Promise<ConfigChange | undefined> => {
     const keys = [...changes.added, ...changes.removed, ...changes.changed.map((c) => c.key)];
-    if (opts.record === undefined || (touched.length === 0 && keys.length === 0)) return undefined;
+    if (opts.record === undefined) return undefined;
+    const rev = opts.revisions?.next();
+    const files = [...new Set([...touched, ...(rev?.changed ?? [])])].sort();
+    if (files.length === 0 && keys.length === 0 && !always) return undefined;
     const lines = describeChanges(changes, before, opts.instances?.() ?? []);
     const change: ConfigChange = {
       at,
-      file: touched.join(", ") || "config",
+      file: files.join(", ") || "config",
       by,
       summary: summary ?? (lines.length > 0 ? lines.join("; ") : "no instance changed"),
       // A scope change may change what any instance sees: global.
-      ...(touched.includes("allowlist.json") ? {} : { instances: keys }),
+      ...(files.includes("allowlist.json") ? {} : { instances: keys }),
+      ...(rev !== undefined ? { revision: rev.revision, ...(rev.parent !== undefined ? { parent: rev.parent } : {}), files: rev.files } : {}),
     };
     try {
       await opts.record(change);
+      opts.revisions?.add(change);
       return change;
     } catch (err) {
       opts.log("error", `config journal: ${String(err)}`);
@@ -174,7 +208,7 @@ export function createReloader(opts: {
     }
   };
 
-  const attempt = async (source: ReloadOutcome["source"], by: string, summary?: string): Promise<ReloadOutcome> => {
+  const attempt = async (source: ReloadOutcome["source"], by: string, summary?: string, always = false): Promise<ReloadOutcome> => {
     let outcome: ReloadOutcome;
     const before = opts.instances?.() ?? [];
     const read = files();
@@ -189,7 +223,7 @@ export function createReloader(opts: {
         ...changes.changed.map((c) => `~${c.key} (${c.why})`),
       ];
       opts.log("info", `reload (${source}): ${outcome.summary}${keys.length > 0 ? ` — ${keys.join(", ")}` : ""}`);
-      const journaled = await journal(changes, touched, before, outcome.at, by, summary);
+      const journaled = await journal(changes, touched, before, outcome.at, by, summary, always);
       if (journaled !== undefined) outcome.journaled = journaled;
     } catch (err) {
       outcome = { ok: false, at: now(), source, by, error: (err as Error).message ?? String(err) };
@@ -206,6 +240,15 @@ export function createReloader(opts: {
     return run;
   };
 
+  /** Write, reload, and put the files back when the reload rejects them. */
+  const write = async (w: ConfigWrite): Promise<ReloadOutcome> => {
+    const restore = w.apply();
+    // The file watch sees these writes too; its reload finds nothing new to journal.
+    const outcome = await attempt("api", w.by, w.summary, w.always === true);
+    if (!outcome.ok) restore();
+    return outcome;
+  };
+
   return {
     reload(source, o) {
       return inTurn(() => attempt(source, o?.by ?? (source === "file" ? "file" : "api")));
@@ -218,33 +261,40 @@ export function createReloader(opts: {
         const old = existsSync(path) ? readFileSync(path, "utf8") : undefined;
         const changed = e.change(old);
         const { text, summary } = typeof changed === "string" ? { text: changed, summary: e.summary } : changed;
-        // The file watch sees this write too; its reload finds nothing new to journal.
-        if (text !== old) writeFileSync(path, text);
-        const outcome = await attempt("api", e.by, summary);
-        if (!outcome.ok) {
-          if (old === undefined) unlinkSync(path);
-          else writeFileSync(path, old);
-        }
-        return outcome;
+        return write({
+          by: e.by,
+          ...(summary !== undefined ? { summary } : {}),
+          apply: () => {
+            if (text !== old) writeFileSync(path, text);
+            return () => {
+              if (old === undefined) unlinkSync(path);
+              else writeFileSync(path, old);
+            };
+          },
+        });
       });
     },
+    write: (w) => inTurn(() => write(w)),
     last: () => last,
   };
 }
 
-/** fs.watch's shape, as far as the watcher uses it (tests pass a fake). */
+/** fs.watch's shape, as far as the watcher uses it (tests pass a fake). File names are relative to `dir`, sub-folders included. */
 export type WatchFn = (dir: string, listener: (event: string, filename: string | null) => void) => { close(): void };
 
 const fsWatch: WatchFn = (dir, listener) => {
-  const w = watch(dir, (event, filename) => listener(event, filename === null ? null : String(filename)));
+  // Recursive: heuristics/ and packages/ are part of the working set.
+  const w = watch(dir, { recursive: true }, (event, filename) => listener(event, filename === null ? null : String(filename)));
   // A watch that breaks (the folder removed) stops reloading; the endpoint still works.
   w.on("error", () => w.close());
   return w;
 };
 
 /**
- * Call `onChange` once the config files have been quiet for `debounceMs`: an editor's
- * save is several events (write, rename, chmod), a copy of three files is more.
+ * Call `onChange` once the working set's files have been quiet for `debounceMs`: an
+ * editor's save is several events (write, rename, chmod), a copy of a package is more.
+ * The files: heuristics.json, allowlist.json, tiles.json, the lock, and anything under
+ * heuristics/ and packages/ but dot files and the generated typings (`files` narrows it).
  */
 export function watchConfig(opts: {
   dir: string;
@@ -254,7 +304,12 @@ export function watchConfig(opts: {
   debounceMs?: number;
   watch?: WatchFn;
 }): { close(): void } {
-  const files = opts.files ?? CONFIG_FILES;
+  const watched = (f: string): boolean => {
+    const p = f.split("\\").join("/");
+    if (opts.files !== undefined) return opts.files.includes(p);
+    // The folders themselves too: one created, removed or renamed whole.
+    return p === "heuristics" || p === "packages" || inWorkingSet(p);
+  };
   const changed = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const fire = (): void => {
@@ -266,7 +321,7 @@ export function watchConfig(opts: {
   try {
     const w = (opts.watch ?? fsWatch)(opts.dir, (_event, filename) => {
       // No file name (some platforms): it may have been one of ours.
-      if (filename !== null && !files.includes(filename)) return;
+      if (filename !== null && !watched(filename)) return;
       changed.add(filename ?? "?");
       if (timer !== undefined) clearTimeout(timer);
       timer = setTimeout(fire, opts.debounceMs ?? 1000);

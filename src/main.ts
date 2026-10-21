@@ -58,6 +58,7 @@ import { INSTRUCTIONS, createHouseTools } from "./mcp/tools.js";
 import { createHouseRecord } from "./mcp/timeline.js";
 import { createPauseControl, pauseAggregate, pauseEventCodec, pauseStateCodec } from "./pause.js";
 import { configAggregate, configEventCodec, configStateCodec, createConfigJournal } from "./working-set.js";
+import { createRevisionStore, recordBootRevision } from "./revisions.js";
 
 const LEVELS = ["debug", "info", "warning", "error"] as const;
 
@@ -411,10 +412,19 @@ const readApi = createReadApi(
   {},
 );
 
-// 10b. Config reload: a change of heuristics.json, allowlist.json or tiles.json (1 s
-// after the last), or POST api/reload, applies in-process, all or nothing. Only the
-// instances that changed restart; add-on options still need a restart. What a reload
-// changed is journaled with who did it, and the panel's mode changes go through it.
+// 10b. Config reload: a change of a working-set file (1 s after the last), or POST
+// api/reload, applies in-process, all or nothing. Only the instances that changed
+// restart; add-on options still need a restart. What a reload changed is journaled with
+// who did it, as the working set's next revision (its files under /data/revisions), and
+// the panel's edits, rollbacks and promotes go through it.
+const recordConfig = createConfigJournal(runtime);
+const revisions = createRevisionStore({ dir: join(config.dataDir, "revisions"), configDir: config.configDir, journal });
+try {
+  const booted = await recordBootRevision(revisions, recordConfig);
+  if (booted !== undefined) log("info", `working set: revision ${booted.revision} (${booted.summary})`);
+} catch (err) {
+  log("error", `working set: could not record the revision at start: ${String(err)}`);
+}
 const reloader = createReloader({
   apply: () =>
     applyConfig({
@@ -442,7 +452,8 @@ const reloader = createReloader({
   // What changed, by whom, journaled in teob-config for the timeline.
   configDir: config.configDir,
   instances: () => heuristics.instances(),
-  record: createConfigJournal(runtime),
+  record: recordConfig,
+  revisions,
   // The panel refetches the instances on this frame; the bot's menu follows the commands.
   onReloaded: (outcome) => {
     bus.publish({ type: "reload", ...outcome } as unknown as StreamFrame);
@@ -495,6 +506,8 @@ const server = startServer(
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
     studio: { configDir: config.configDir, mode: config.mode, liveStates: () => bridge.liveCache().values(), scope, packages: () => packages },
     reload: reloader,
+    revisions,
+    twins: journal,
     library: { current: () => library, packages: () => packages },
     pause,
     command: (name, args, from) => heuristics.command(name, args, from),
