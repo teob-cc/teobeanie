@@ -380,7 +380,8 @@ One historical exception stays:
    reload stays the judge of the scope and the owners; a rejection puts the file back.
 3. **Every edit is a journaled event.** A change to the working set (from the panel,
    the file watch or the CLI) is applied through the reload path and journaled as
-   `ConfigChanged { file, by, summary }` next to the decisions it affects. The timeline
+   `ConfigChanged { file, by, summary, instances, revision, parent, files }` next to
+   the decisions it affects. The timeline
    then shows "the run-on was changed from 5 to 10 min" between the decisions before
    and after; the agent needs the same event to explain a change in behaviour.
    *Built* (`src/working-set.ts`): every reload that changed a file or an instance is
@@ -415,6 +416,44 @@ One historical exception stays:
 6. **The record stays whole across versions.** Journal event tags are only ever added;
    a heuristic's events are versioned by name when their meaning changes; replays of an
    old week against new code remain possible.
+7. **Every change is a revision, and every revision can be undone.** *Built*
+   (`src/revisions.ts`): each journaled ConfigChanged carries `revision`, `parent` and
+   `files`, the whole working set after it (`heuristics.json`, `allowlist.json`,
+   `tiles.json`, `teobeanie.lock.json`, `heuristics/**`, `packages/**`; not dot files,
+   `node_modules` or the generated typings) as path → sha256. The contents are stored
+   once each under `/data/revisions/objects/<2>/<hash>`; the journal is the index, so
+   the revisions are folded from the teob-config stream at start, and rows from before
+   revisions (no `revision`) are skipped. The start records the folder as revision 1,
+   or as a new revision (`by: "boot"`) when it differs from the last. With revisions a
+   reload journals when any working-set file changed (a spec, a README), not only when
+   an instance did. `rollback(n)` writes n's files back (only the ones that differ;
+   a working-set file n did not have is removed, with the folders that leaves empty;
+   nothing else is touched) through `Reloader.write`, the same all-or-nothing path as
+   the panel's edits: a rejected reload puts every file back. It is journaled as a new
+   revision, `summary: "rollback to n"`. The file watch is recursive and reloads on
+   the lock and on anything under `heuristics/` and `packages/` too. API, the writes
+   through ingress only: `GET api/revisions`, `GET api/revisions/<n>` (files; `?path=`
+   one file's text), `GET api/revisions/<a>/diff/<b>` (a unified diff per file),
+   `POST api/revisions/<n>/rollback`. `listRevisions`, `revisionDetail`,
+   `revisionFile`, `diffRevisions` and `rollback` are plain functions for the agent's
+   tools.
+8. **A new version runs beside the old one before it replaces it.** *Built*
+   (`src/twins.ts`, `kernel/host.ts`): an instance with `"twinOf": "<heuristic>/<id>"`
+   is its original's shadow twin. It watches and reads what it likes, and may name the
+   original's entities: of a pair one claims (the original, unless the twin is active
+   or the original off) and the other vets as it, dry (`SafeActuator.vet(…, dry)`:
+   ownership, scope, bounds and the pause as the claimer, no rate window), so a twin
+   never spends its original's budget. A twin active while its original is, a twin of
+   a twin, a second twin of one instance, and a twin switching a third instance's
+   entity are rejected. `compareTwin` matches the two streams' `Decided` events by
+   their input signal (the causation obsId) since the twin's first row and compares
+   their actions, whatever their verdict; decisions on start, timers, triggers and
+   commands are counted, not compared. `promoteTwin` is one edit of
+   `heuristics.json` (`promoteTwinText`): the original removed (its stream stays), the
+   twin under the original's id and mode, its own heuristic and params kept, `twinOf`
+   gone. One revision, so a rollback undoes it. `GET api/twins`,
+   `GET api/twins/<heuristic>/<id>` (`?from=&to=`, default the last day),
+   `POST api/twins/<heuristic>/<id>/promote` (ingress only).
 
 ## 7. The agent
 
@@ -528,8 +567,10 @@ src/
   projections.ts     the call timeline view
   telegram.ts        the command lane (getUpdates)
   monitor.ts         self-monitoring and the daily summary
-  reload.ts          file watch, POST api/reload, apply all-or-nothing, the panel's edits
+  reload.ts          file watch (recursive), POST api/reload, apply all-or-nothing, the panel's edits
   working-set.ts     the teob-config stream (ConfigChanged), in-place heuristics.json edits, api/instances/…/mode
+  revisions.ts       the working set's revisions (/data/revisions), diff, rollback, api/revisions
+  twins.ts           shadow twins compared per input signal, promote, api/twins
   replay.ts          replay and parity
   server.ts          HTTP routes, SSE, static panel, MCP mount
 panel/src/           views/ (House, Decisions, Heuristics, Studio, Today=Calls), studio/ (Monaco, test worker)

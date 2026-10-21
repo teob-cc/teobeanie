@@ -582,9 +582,12 @@ worked examples are
 
 ## Changing the config while it runs
 
-`heuristics.json`, `allowlist.json` and `tiles.json` are read again one second after
-the last change to any of them, and on `POST api/reload` (ingress only, like the
-Studio's writes; the panel's **Reload config** button). `heuristics/` and `packages/` are read with them.
+The working set is read again one second after the last change to any of its files
+(`heuristics.json`, `allowlist.json`, `tiles.json`, `teobeanie.lock.json`, anything
+under `heuristics/` and `packages/`), and on `POST api/reload` (ingress only, like the
+Studio's writes; the panel's **Reload config** button). Each applied change is a
+revision of the working set, which can be diffed and rolled back
+([working-set.md](working-set.md#undoing-a-change)).
 A reload is planned in full before anything changes (`host.prepare()`), then committed:
 
 - An instance whose mode, params, code or entities (an outdoor source moved) changed
@@ -610,6 +613,36 @@ stopped is dropped, so the action is settled as interrupted on the new start, an
 notice decided within `resendWithinMs` is sent once more: the same rule as a restart,
 over a window of milliseconds instead of seconds. The add-on options (`shadow_mode`,
 Telegram, the log level) are not part of a reload and still need a restart.
+
+### Shadow twins
+
+A twin tries a new version of an instance on the same inputs as the one that runs: new
+params, a newer package, a rule rewritten from scratch. It is an instance with
+`"twinOf"` naming its original, in shadow:
+
+```json
+{ "heuristic": "sensor-light", "id": "hallway", "mode": "active", "params": { … } },
+{ "heuristic": "sensor-light", "id": "hallway-next", "mode": "shadow", "twinOf": "sensor-light/hallway", "params": { … } }
+```
+
+- It may watch, read and name the same entities to switch as its original. Of the pair
+  one claims them: the original, unless the twin is active (allowed only while the
+  original is not) or the original is off. The other's actions are vetted as the
+  claimer's would be (scope, ownership, bounds, the pause), but not counted against a
+  rate limit: a twin never calls, so it spends none of its original's budget.
+- A twin is never active while its original is; a twin of a twin, two twins of one
+  instance, and a twin that switches what a third instance owns are rejected, like two
+  owners of one entity.
+- The panel compares the two: for each input signal either decided on since the twin
+  started, the actions each decided (requested, suppressed or refused alike), and lists
+  where they differ. Decisions on other inputs (start, timers, triggers, commands)
+  have no shared id and are only counted. `GET api/twins/<heuristic>/<id>`.
+- **Promote** (`POST api/twins/<heuristic>/<id>/promote`) swaps them in one edit of
+  `heuristics.json`: the original is removed (its stream stays in the journal), and the
+  twin takes its id and mode and keeps its own heuristic, package and params. The
+  promoted instance runs on the stream of its new key: with the same heuristic that is
+  the original's stream, replayed under the new params, as after any params change.
+  It is one revision, so a rollback to the one before undoes it.
 
 ## Inputs
 

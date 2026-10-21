@@ -44,8 +44,9 @@ changed is marked "changed" in the library, and `teobeanie.lock.json` says
 `"modified": true`. A package we deleted stays deleted, unless `heuristics.json` still
 uses it: then it comes back on the next start.
 
-Keep the folder in git. Then every change is a few lines you can read, and every
-mistake can be undone (see [Undoing a change](#undoing-a-change)).
+Teobeanie keeps every version of the folder itself (see
+[Undoing a change](#undoing-a-change)). Keeping it in git as well does no harm: then
+the history is also yours, outside the add-on.
 
 ## The three files
 
@@ -95,6 +96,7 @@ Each entry is an **instance**: one use of a ready-made pattern (a *heuristic*, h
 | `params` | The pattern's settings: which sensors, which lights, how many minutes |
 | `alerts` | Optional. `true` also sends this instance's notices to the alerts chat |
 | `notifyPerHour` | Optional. The most notices this instance may send in an hour |
+| `twinOf` | Optional. Makes this instance a shadow twin of another one (below) |
 
 Two instances of the same pattern are independent: one hallway, one stairs. Two
 instances may not switch the same thing. Teobeanie refuses that, because they would
@@ -202,8 +204,8 @@ By hand it is the same thing, in a text editor:
 
 ## When a change takes effect
 
-Teobeanie reads the three files again a second after the last save, and the
-`heuristics/` and `packages/` folders with them. There is no restart. Only the instances you changed
+Teobeanie reads the folder again a second after the last save: the three files, the
+lock, and anything in `heuristics/` and `packages/`. There is no restart. Only the instances you changed
 are stopped and started again; everything else keeps running with its timers.
 
 If something is wrong, **nothing changes**: the old set keeps running, and the
@@ -218,16 +220,70 @@ restart of the add-on.
 
 ## Undoing a change
 
-- **In git:** `git diff` shows what changed since the last commit, `git restore
-  heuristics.json` puts the file back, and `git log -p heuristics.json` shows every
-  earlier version. Save, and the house follows.
-- **In the journal:** every change to the working set is recorded next to the
-  decisions it affected, for example "the run-on was changed from 5 to 10 min". The
-  timeline shows these between the decisions before and after, so you can see which
-  edit changed the behaviour, and type the old value back.
+Every change Teobeanie applies is a **revision**, numbered: a copy of the whole folder
+as it was right after the change (the three files, the lock, `heuristics/` and
+`packages/`, not the generated typings). It does not matter where the change came
+from: the panel, a saved file, the CLI or an agent. The first start records the folder
+as revision 1, and a start after the files were edited while Teobeanie was stopped
+records them as the next one.
+
+In the **Heuristics** tab, **Revisions** lists them, newest first:
+
+```
+#14  Today 18:02  person:Alex  door-nag/back: params changed (everyMin 5 → 10)  heuristics.json
+#13  Today 09:40  file         no instance changed                              heuristics/night-light.test.ts
+#12  Yesterday    boot         changed while Teobeanie was stopped              allowlist.json
+```
+
+- **Diff** shows what the revision changed, file by file, as lines taken out (`-`) and
+  put in (`+`).
+- **Roll back…** asks first, then puts the folder back as it was at that revision:
+  the files that differ are written back, and a file added since then is removed.
+  Files that are not part of the working set (notes, the typings) are left alone. The
+  change is checked and applied like any other, all or nothing: if it is refused,
+  nothing changes and the tab says why.
+
+A rollback is itself a new revision ("rollback to 12"), so a rollback can be rolled
+back too. Nothing is ever lost: the journal keeps what each instance did, whatever
+revision it ran.
+
+Other ways to look back:
+
+- **In the journal:** every revision is recorded next to the decisions it affected,
+  for example "the run-on was changed from 5 to 10 min". The timeline shows these
+  between the decisions before and after, so you can see which edit changed the
+  behaviour.
+- **In git**, if you keep the folder in git: `git diff`, `git log -p heuristics.json`
+  and `git restore` work as always. Save, and the house follows.
 
 The quickest undo for a misbehaving instance is not to edit numbers but to set its
 mode to `shadow`, or to press the pause.
+
+## Trying a new version beside the old one: twins
+
+To try new settings, a newer version of a package, or a rule rewritten from scratch,
+without giving up the instance that works, add a **twin**: a second instance with
+`"twinOf"` naming the original, in shadow.
+
+```json
+{ "heuristic": "door-nag", "id": "back", "mode": "active",
+  "params": { "door": "binary_sensor.back_door", "everyMin": 10 } },
+{ "heuristic": "door-nag", "id": "back-next", "mode": "shadow", "twinOf": "door-nag/back",
+  "params": { "door": "binary_sensor.back_door", "everyMin": 5 } }
+```
+
+The twin watches the same things and decides on the same events, and may name the
+same lights as the original: it never switches them while the original is active.
+Its card in the Heuristics tab says how many events in the last day it decided
+differently; its page lists them, the original's action next to the twin's.
+
+When the twin does what you want, press **Promote…**. In one step the twin takes the
+original's place: it gets the original's id and mode, keeps its own settings (and its
+pattern, so a newer package version), and the original is removed. That is one
+revision, so **Roll back…** to the one before undoes it.
+
+A twin is never active while its original is: Teobeanie refuses that, as it would
+two instances switching one light.
 
 ## A rule of our own
 

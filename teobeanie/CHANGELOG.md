@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Revisions and rollback.** Every applied change to the config folder is a numbered
+  revision, its files kept under `/data/revisions`; the Heuristics tab lists them with
+  who and what, shows a diff, and rolls back to any of them (a revision itself). The
+  file watch now also reloads on changes in `heuristics/`, `packages/` and the lock.
+- **Shadow twins.** `"twinOf"` runs a new version of an instance beside it in shadow,
+  on the same inputs; the panel shows where their decisions differ, and Promote swaps
+  them in one revision.
+
 ## 0.2.0 — first public alpha
 
 Teobeanie runs a house's behaviours as small pure functions written in TypeScript,
