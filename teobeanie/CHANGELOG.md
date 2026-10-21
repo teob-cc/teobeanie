@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — move to another install
+## 0.4.1 — move to another install
 
 - **Move to another install.** Home Assistant restores an add-on's backup only into the
   same slug; now a house can move from one Teobeanie install to another (the local
