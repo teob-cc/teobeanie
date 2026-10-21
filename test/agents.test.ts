@@ -4,6 +4,8 @@
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AddressInfo } from "node:net";
+import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { callerLabel } from "../src/mcp/access.js";
@@ -209,6 +211,45 @@ describe("the agent port", () => {
     for (let i = 0; i < 8; i++) expect((await call(whoami, "192.168.1.30", { authorization: "Bearer tbn_wrong" })).status).toBe(401);
     expect((await call(whoami, "192.168.1.30", { authorization: `Bearer ${token}` })).status).toBe(429);
     expect((await call(whoami, "192.168.1.31", { authorization: `Bearer ${token}` })).status).toBe(200);
+  });
+
+  it("over a real socket: the peer is the connection's own address", async () => {
+    const { tokens } = tokensIn();
+    const { token } = await tokens.mint("agent", "local");
+    const recorded: Array<Omit<ToolCalled, "tag">> = [];
+    const open = (networks: string[]) => {
+      const mcp = createMcp({
+        mode: "addon",
+        networks,
+        tools: [{ name: "whoami", description: "who", inputSchema: { type: "object", properties: {} }, execute: async () => ({ success: true, output: currentCaller() ?? null }) } as never],
+        instructions: "test",
+        version: "test",
+        record: (c) => recorded.push(c),
+        log: () => {},
+      });
+      const server = serve({ fetch: agentApp((a) => mcp.mountAgents(a, { tokens, limiter: createFailureLimiter() })).fetch, port: 0, hostname: "127.0.0.1" });
+      return new Promise<{ url: string; close: () => void }>((resolve) =>
+        server.once("listening", () => resolve({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close: () => server.close() })),
+      );
+    };
+    const post = (url: string, auth?: string) =>
+      fetch(`${url}/mcp`, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(whoami) });
+    const loopback = await open(["127.0.0.0/8"]);
+    try {
+      expect((await post(loopback.url)).status).toBe(401);
+      const ok = await post(loopback.url, `Bearer ${token}`);
+      expect(ok.status).toBe(200);
+      expect(await text(ok)).toMatchObject({ via: "agent", agent: "agent", address: "127.0.0.1" });
+      expect((await fetch(`${loopback.url}/health`)).status).toBe(404);
+    } finally {
+      loopback.close();
+    }
+    const lanOnly = await open(LAN);
+    try {
+      expect((await post(lanOnly.url, `Bearer ${token}`)).status).toBe(403);
+    } finally {
+      lanOnly.close();
+    }
   });
 
   it("leaves the ingress door as it was", async () => {
