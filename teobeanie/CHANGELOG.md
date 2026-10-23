@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — the gas split needs the whole day
+## 0.5.2 — the gas split needs the whole day
 
 - **A day's gas is split between hot water and heating only when the signals cover the
   whole day.** The signals must hold a gas meter reading from before midnight. A day the
