@@ -3,10 +3,13 @@
 // statistics hold (up to five years, newest first, a month at a time), fetching past
 // prices where the statistics have none; then it closes each day after midnight. A day
 // closes with the gas split between hot water and heating while the signals still hold
-// the boiler's states, and with the showers the shower-summary instances reported.
+// the boiler's states, and with the showers the shower-summary instances reported. A
+// change of energy.json or of HA's energy preferences closes every day again (a day
+// whose boiler states are gone keeps the split it had).
 // Read-only towards Home Assistant: energy/get_prefs, statistics, config entries, and
 // the price history's service calls that only return data.
 
+import { createHash } from "node:crypto";
 import type { HaClient } from "@lambda-house/teob-ts/ha";
 import type { JournalReader } from "@lambda-house/teob-ts/core";
 import type { SignalStore } from "@lambda-house/teob-ts/ha";
@@ -61,6 +64,8 @@ const UNITS = { energy: "kWh", volume: "m³" };
 const SHOWER_CATEGORY = "shower-summary";
 
 const emptyStats = (): HourlyStats => ({ change: new Map(), mean: new Map() });
+/** What a closed day depends on besides the statistics: the sources and energy.json. */
+const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ s, file })).digest("hex").slice(0, 16);
 const entityOf = (p: PriceSpec): string | undefined => ("entity" in p ? p.entity : undefined);
 const parseTime = (s: unknown): number => (typeof s === "number" ? s : typeof s === "string" ? Date.parse(s.replace(" ", "T")) : NaN);
 
@@ -321,18 +326,20 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
         // Just after midnight HA may not have compiled yesterday's last hour: up to the day before.
         const yesterday = addDays(today(), -1);
         const lastClosable = now() < dayStart(today(), zone()) + CLOSE_AFTER_MS ? addDays(yesterday, -1) : yesterday;
-        const pending = daysBetween(firstDay, lastClosable).filter((d) => !closed.has(d));
+        const fp = fingerprintOf(s, file);
+        const pending = daysBetween(firstDay, lastClosable).filter((d) => closed.get(d)?.fingerprint !== fp);
         status.pendingDays = pending.length;
         status.firstDay = firstDay;
         if (pending.length === 0) return;
-        deps.log("info", `energy: closing ${pending.length} day(s) from ${pending[0]} to ${pending.at(-1)}`);
+        const again = pending.filter((d) => closed.has(d)).length;
+        deps.log("info", `energy: closing ${pending.length} day(s) from ${pending[0]} to ${pending.at(-1)}${again > 0 ? ` (${again} again: closed with other sources or another energy.json)` : ""}`);
         // A month at a time, newest first: the recent days, with prices in the statistics, come first.
         const months = new Map<string, string[]>();
         for (const d of pending) months.set(d.slice(0, 7), [...(months.get(d.slice(0, 7)) ?? []), d]);
         const means = await monthlyMeans(s);
         for (const days of [...months.values()].reverse()) {
           if (stopped) return;
-          await closeDays(s, days, means);
+          await closeDays(s, days, means, fp);
           status.pendingDays = Math.max(0, status.pendingDays - days.length);
           if ((deps.chunkPauseMs ?? 2000) > 0 && months.size > 1) await sleep(deps.chunkPauseMs ?? 2000);
         }
@@ -351,7 +358,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
     return running;
   };
 
-  const closeDays = async (s: ResolvedSources, days: string[], means: Map<string, Array<{ start: number; mean: number }>>): Promise<void> => {
+  const closeDays = async (s: ResolvedSources, days: string[], means: Map<string, Array<{ start: number; mean: number }>>, fp: string): Promise<void> => {
     const a = days[0]!;
     const b = days.at(-1)!;
     const from = dayStart(a, zone());
@@ -374,7 +381,10 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
     for (const d of days) {
       const dFrom = dayStart(d, zone());
       const dTo = dayStart(addDays(d, 1), zone());
-      const shares = sharesOf(s, dFrom, dTo);
+      // Closed again after the signals are gone: the split it was closed with.
+      const prev = closed.get(d)?.ledger.gas;
+      const kept = s.attribution !== undefined && prev?.hotWaterM3 !== undefined && prev.m3 > 0 ? { hotWater: prev.hotWaterM3 / prev.m3, heating: (prev.heatingM3 ?? 0) / prev.m3 } : undefined;
+      const shares = sharesOf(s, dFrom, dTo) ?? kept;
       const showers = showersOf(dFrom, dTo);
       const res = computeDay({
         key: d,
@@ -393,7 +403,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       if (s.attribution !== undefined && shares === undefined && res.ledger.gas.m3 > 0 && dTo > now() - 25 * 24 * HOUR) {
         flags.push({ kind: "unattributed", id: s.attribution.gas, at: dFrom, text: `${d}: the gas could not be split (no meter readings or boiler states in the signals)` });
       }
-      events.push({ tag: "DayClosed", at: now(), ledger: res.ledger, flags });
+      events.push({ tag: "DayClosed", at: now(), ledger: res.ledger, flags, fingerprint: fp });
     }
     await deps.record(events);
     for (const e of events) fold(e);
@@ -626,6 +636,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
     },
 
     configure(next) {
+      // The days closed with the old energy.json are closed again on the next tick.
       file = next;
       prefs = undefined;
       todayCache = undefined;
@@ -648,9 +659,9 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       if (tick > 0) {
         // The first run waits for Home Assistant to be connected and the house's zone known.
         kickoff = setTimeout(() => void catchUp(), 30_000);
+        // Then every tick: yesterday after midnight, days left over, days closed with another configuration.
         timer = setInterval(() => {
-          const y = addDays(today(), -1);
-          if ((status.pendingDays > 0 || !closed.has(y)) && now() >= dayStart(today(), zone()) + CLOSE_AFTER_MS) void catchUp();
+          if (now() >= dayStart(today(), zone()) + CLOSE_AFTER_MS) void catchUp();
         }, tick);
       }
     },

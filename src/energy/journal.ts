@@ -36,12 +36,14 @@ export interface PricesRecorded {
   slots: Array<[number, number, number]>;
 }
 
-/** A day closed: its ledger, and what was wrong with its data. */
+/** A day closed: its ledger, and what was wrong with its data. A later DayClosed of the same day replaces it. */
 export interface DayClosed {
   tag: "DayClosed";
   at: number;
   ledger: Ledger;
   flags: DataFlag[];
+  /** The sources and energy.json it was closed with: a day closed with others is closed again. */
+  fingerprint?: string;
 }
 
 export type EnergyEvent = PricesRecorded | DayClosed;

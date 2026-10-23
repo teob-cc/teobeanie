@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — closing the days again after a configuration change
+
+- **A change of energy.json or of Home Assistant's energy preferences closes the past days
+  again.** Each closed day now records what it was closed with. A day closed with
+  other sources, or with another energy.json, is closed again at the next run, in the
+  background. Before, a closed day was final, so days closed before energy.json was
+  written stayed without its water meter and gas split. A day whose boiler states are no
+  longer in the signals keeps the gas split it had. The days 0.5.0 closed are closed
+  once more after the update.
+
 ## 0.5.0 — the energy ledger and the Energy tab
 
 - **Energy ledger.** Teobeanie now keeps the house's euros and quantities per hour, day,

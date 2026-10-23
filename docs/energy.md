@@ -36,8 +36,11 @@ Today is computed as it goes and never stored. Each past day is **closed** once:
 journaled as `DayClosed` in `teob-energy/ledger` with its ledger and its data flags.
 At the first start the ledger closes every day the statistics hold, up to five years,
 newest first, a month at a time, in the background. Then it closes each day 20 minutes
-after midnight. A closed day is final: the record does not change when Home Assistant's
-statistics or prices do later.
+after midnight. Each closed day records what it was closed with: the sources (HA's energy
+preferences) and `energy.json`. When either changes, every day is closed again, in the
+background, as a new `DayClosed` that replaces the old one. A day whose boiler states the
+signals no longer hold keeps the gas split it had. Otherwise a closed day does not change
+when Home Assistant's statistics or prices do later.
 
 What only a closed day can keep:
 

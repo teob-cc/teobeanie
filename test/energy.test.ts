@@ -492,6 +492,35 @@ describe("createEnergyService", () => {
     expect(o.today.showers).toEqual({ count: 2, litres: 75, gasM3: 0.3, cost: 0.62 });
   });
 
+  it("closes the days again when energy.json changes, keeping a gas split the signals no longer hold", async () => {
+    const { make, record, journal } = service();
+    // The 22nd was closed before, with a split and another configuration.
+    journal.append(ENERGY_CATEGORY, "ledger", {
+      tag: "DayClosed",
+      at: NOW - 24 * HOUR,
+      ledger: { key: "2026-10-22", gas: { m3: 2.4, cost: 0, hotWaterM3: 0.6, heatingM3: 1.2 } },
+      flags: [],
+      fingerprint: "an-older-one",
+    });
+    const file = { attribution: { hotWater: "binary_sensor.boiler_hot_water" } };
+    const svc = make();
+    svc.configure(parseEnergyFile(file));
+    svc.start();
+    await svc.catchUp();
+    const closedNow = () => record.mock.calls.flatMap((c) => c[0]).filter((e): e is Extract<EnergyEvent, { tag: "DayClosed" }> => e.tag === "DayClosed");
+    expect(closedNow().map((e) => e.ledger.key).sort()).toEqual(["2026-10-20", "2026-10-21", "2026-10-22"]);
+    expect(closedNow().find((e) => e.ledger.key === "2026-10-22")!.ledger.gas).toMatchObject({ m3: 2.4, hotWaterM3: 0.6, heatingM3: 1.2 });
+    // Nothing changed: nothing closes again.
+    await svc.catchUp();
+    expect(closedNow()).toHaveLength(3);
+    // A water meter added: every day again, the split kept.
+    svc.configure(parseEnergyFile({ ...file, water: { stat: "sensor.water_meter", price: 1 } }));
+    await svc.catchUp();
+    expect(closedNow()).toHaveLength(6);
+    expect(closedNow().at(-1)!.fingerprint).not.toBe(closedNow()[0]!.fingerprint);
+    expect(closedNow().filter((e) => e.ledger.key === "2026-10-22").at(-1)!.ledger.gas.hotWaterM3).toBe(0.6);
+  });
+
   it("says there is nothing to show without sources", async () => {
     const { make, ha } = service();
     ha.send.mockImplementation(async () => ({}));
