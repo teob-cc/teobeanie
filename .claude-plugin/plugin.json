@@ -1,7 +1,7 @@
 {
   "name": "teobeanie",
   "displayName": "Teobeanie",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Skills to set up and run Teobeanie on Home Assistant with your agent: onboard, develop, operate, explain, and a Node-RED migration.",
   "author": {
     "name": "teob-cc",

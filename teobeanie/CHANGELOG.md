@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — closing the days again after a configuration change
+## 0.5.1 — closing the days again after a configuration change
 
 - **A change of energy.json or of Home Assistant's energy preferences closes the past days
   again.** Each closed day now records what it was closed with. A day closed with
