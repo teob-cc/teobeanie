@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The Energy tab's heat pump band names its last column "Heat pump saves" and shows the saving as a plain amount (a loss as "costs … more").
+
 ## 0.6.0 — a heat pump instead of gas
 
 - **A heat pump instead of gas: the ledger answers whether it pays.**

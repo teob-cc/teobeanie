@@ -391,7 +391,7 @@ function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | nu
               <th>Heat from gas</th>
               <th>Gas route</th>
               <th>Heat pump</th>
-              <th>Difference</th>
+              <th>Heat pump saves</th>
               <th>Per degree day</th>
             </tr>
           </thead>
@@ -407,7 +407,7 @@ function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | nu
                 <td>{fmtKwh(v!.heatKwh)}</td>
                 <td title={`gas ${fmtEur(s.ledger.heat!.gasCost)} + gas connection ${fmtEur(s.ledger.heat!.gasFixed)}`}>{fmtEur(v!.gasRoute)}</td>
                 <td title={fmtKwh(s.ledger.heat!.heatPumpKwh)}>{fmtEur(v!.heatPump)}</td>
-                <td>{v!.saving >= 0 ? `−${fmtEur(v!.saving)}` : `+${fmtEur(-v!.saving)}`}</td>
+                <td>{v!.saving >= 0 ? fmtEur(v!.saving) : `costs ${fmtEur(-v!.saving)} more`}</td>
                 <td>{v!.perDegreeDay !== null ? fmtEur(v!.perDegreeDay) : "—"}</td>
               </tr>
             ))}
