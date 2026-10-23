@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — the energy ledger and the Energy tab
+## 0.5.0 — the energy ledger and the Energy tab
 
 - **Energy ledger.** Teobeanie now keeps the house's euros and quantities per hour, day,
   ISO week, month and year: grid import and export, solar, gas, water and each device

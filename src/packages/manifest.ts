@@ -31,7 +31,7 @@ import type { AnyHeuristic, Pattern } from "../kernel/heuristic.js";
 import type { ParamField, ParamSpec } from "../kernel/params.js";
 
 /** The version of the "teobeanie" module (the SDK) a package's platform range is checked against: package.json's (a test keeps them equal). */
-export const SDK_VERSION = "0.4.1";
+export const SDK_VERSION = "0.5.0";
 
 export const MANIFEST = "teobeanie.json";
 
