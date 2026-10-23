@@ -521,6 +521,46 @@ describe("createEnergyService", () => {
     expect(closedNow().filter((e) => e.ledger.key === "2026-10-22").at(-1)!.ledger.gas.hotWaterM3).toBe(0.6);
   });
 
+  it("splits a day's gas only when the signals cover it from before midnight", async () => {
+    const day = dayStart("2026-10-22", TZ);
+    const rows: Array<{ entityId: string; at: number; value: number | boolean }> = [];
+    const meter = (at: number, value: number) => rows.push({ entityId: "sensor.gas_meter", at, value });
+    const hot = (at: number, on: boolean) => rows.push({ entityId: "binary_sensor.boiler_hot_water", at, value: on });
+    // The signals begin at 22:00 on the 21st: the 22nd is covered, the 21st is not.
+    meter(day - 2 * HOUR, 100);
+    for (let h = 0; h < 24; h++) meter(day + h * HOUR + 30 * 60_000, 100 + 0.1 * (h + 1));
+    hot(day - 2 * HOUR, false);
+    hot(day + 7 * HOUR, true);
+    hot(day + 7 * HOUR + 40 * 60_000, false);
+    const signals = {
+      query: (q: { entityId: string; sinceMs?: number; untilMs?: number }) =>
+        rows
+          .filter((r) => r.entityId === q.entityId && r.at >= (q.sinceMs ?? 0) && r.at < (q.untilMs ?? Infinity))
+          .sort((a, b) => a.at - b.at)
+          .map((r) => ({ at: r.at, normalized: { value: r.value, unit: null } })),
+    };
+    const { ha, journal, record } = service();
+    const svc = createEnergyService({
+      ha: ha as never,
+      journal: journal as never,
+      record,
+      signals: signals as never,
+      timeZone: () => TZ,
+      file: parseEnergyFile({ attribution: { hotWater: "binary_sensor.boiler_hot_water" } }),
+      log: () => {},
+      now: () => NOW,
+      chunkPauseMs: 0,
+      tickMs: 0,
+    });
+    svc.start();
+    await svc.catchUp();
+    const closed = record.mock.calls.flatMap((c) => c[0]).filter((e): e is Extract<EnergyEvent, { tag: "DayClosed" }> => e.tag === "DayClosed");
+    const gasOf = (k: string) => closed.find((e) => e.ledger.key === k)!.ledger.gas;
+    // The hot-water spell 07:00–07:40 reaches the steps read at 07:30 and (with the meter's lag) 08:30: 2 of 24.
+    expect(gasOf("2026-10-22").hotWaterM3).toBeCloseTo((2.4 * 2) / 24, 3);
+    expect(gasOf("2026-10-21").hotWaterM3).toBeUndefined();
+  });
+
   it("says there is nothing to show without sources", async () => {
     const { make, ha } = service();
     ha.send.mockImplementation(async () => ({}));

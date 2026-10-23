@@ -64,8 +64,10 @@ const UNITS = { energy: "kWh", volume: "m³" };
 const SHOWER_CATEGORY = "shower-summary";
 
 const emptyStats = (): HourlyStats => ({ change: new Map(), mean: new Map() });
-/** What a closed day depends on besides the statistics: the sources and energy.json. */
-const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ s, file })).digest("hex").slice(0, 16);
+/** How the ledger closes a day: a change here closes every day again. */
+const LEDGER_VERSION = 2;
+/** What a closed day depends on besides the statistics: the ledger's version, the sources and energy.json. */
+const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ v: LEDGER_VERSION, s, file })).digest("hex").slice(0, 16);
 const entityOf = (p: PriceSpec): string | undefined => ("entity" in p ? p.entity : undefined);
 const parseTime = (s: unknown): number => (typeof s === "number" ? s : typeof s === "string" ? Date.parse(s.replace(" ", "T")) : NaN);
 
@@ -257,9 +259,10 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       .filter((r) => typeof r.normalized.value === "number")
       .map((r) => ({ at: r.at, value: r.normalized.value as number }));
     const inDay = readings.filter((r) => r.at >= from);
-    if (inDay.length < 2) return undefined;
-    // The step into the day counts too: start from the last reading before midnight.
+    // The step into the day counts too: start from the last reading before midnight. Without
+    // one the signals begin during the day, and a part of it would stand for the whole.
     const before = readings.filter((r) => r.at < from).at(-1);
+    if (inDay.length < 2 || before === undefined) return undefined;
     const rowsOf = (id: string | undefined): Array<[number, number]> => {
       if (id === undefined) return [];
       const rows: BinaryRow[] = deps.signals!
@@ -267,7 +270,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
         .map((r) => ({ at: r.at, on: r.normalized.value === true }));
       return onSpans(rows, from - a.lagMs, to);
     };
-    return gasShares(before === undefined ? inDay : [before, ...inDay], rowsOf(a.hotWater), rowsOf(a.heating), a.lagMs);
+    return gasShares([before, ...inDay], rowsOf(a.hotWater), rowsOf(a.heating), a.lagMs);
   };
   const showersOf = (from: number, to: number): Ledger["showers"] => {
     let count = 0, litres = 0, gasM3 = 0, cost = 0;

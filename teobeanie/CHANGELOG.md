@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — the gas split needs the whole day
+
+- **A day's gas is split between hot water and heating only when the signals cover the
+  whole day.** The signals must hold a gas meter reading from before midnight. A day the
+  signals begin during (a new install, a move) stays unattributed. Before, the shares of
+  its last hours stood for the whole day.
+- **A fix to how days are closed closes every day again.** The ledger's version is now
+  part of what each closed day records, so every day is closed again after this update.
+
 ## 0.5.1 — closing the days again after a configuration change
 
 - **A change of energy.json or of Home Assistant's energy preferences closes the past days
