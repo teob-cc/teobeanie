@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — a heat pump instead of gas
+
+- **A heat pump instead of gas: the ledger answers whether it pays.**
+  - Every day also prices an all-electric alternative: the boiler's heat made by a heat
+    pump, each hour at the COP of that hour's outdoor temperature (hot water at its own
+    COP) and at that hour's price, with the gas connection's fixed charges saved.
+  - The Energy tab's new band "Heat pump instead of gas?", `api/energy/seasons` and the
+    MCP `energy` view `seasons` compare the gas route with the heat pump for each heating
+    season (October to April) and for the last 12 months, per degree day too.
+  - The heat pump is set in energy.json's `heatPump`.
+- **The supplier's markup.** A tariff's `importMarkup` adds the supplier's € per imported
+  kWh, for price entities that leave it out; export is credited without it.
+- Every day is closed again after the update.
+
 ## 0.5.3 — a wrong split is not kept
 
 - **A day closed again keeps its old gas split only when the signals were purged for the

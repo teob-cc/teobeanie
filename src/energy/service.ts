@@ -17,12 +17,14 @@ import { addDays, dayKey, dayStart, daysBetween, isDayKey, nextPeriodFirstDay, p
 import { hasSources, resolveSources, sourcesView, type EnergyFile, type EnergyPrefs, type PriceSpec, type ResolvedSources } from "./config.js";
 import { LEDGER_ENTITY, PRICES_ENTITY, readStream, type DayClosed, type EnergyEvent, type PricesRecorded } from "./journal.js";
 import { computeDay, gasShares, onSpans, priceBand, projectDay, sumLedgers, type BinaryRow, type HourlyStats, type PriceKnowledge } from "./ledger.js";
-import type { DataFlag, EnergyHours, EnergyOverview, EnergyPeriods, HourRow, Ledger, PricePoint } from "./types.js";
+import type { DataFlag, EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons, HourRow, Ledger, PricePoint } from "./types.js";
 
 export interface EnergyService {
   overview(): Promise<EnergyOverview>;
   periods(period: Period, from: string, to: string): Promise<EnergyPeriods>;
   hours(date: string): Promise<EnergyHours>;
+  /** The heating seasons, October to April: the last one and the current one so far. */
+  seasons(): Promise<EnergySeasons>;
   /** energy.json changed (a reload). */
   configure(file: EnergyFile): void;
   /** Fold the journal and start closing days. */
@@ -65,7 +67,7 @@ const SHOWER_CATEGORY = "shower-summary";
 
 const emptyStats = (): HourlyStats => ({ change: new Map(), mean: new Map() });
 /** How the ledger closes a day: a change here closes every day again. */
-const LEDGER_VERSION = 3;
+const LEDGER_VERSION = 4;
 /** What a closed day depends on besides the statistics: the ledger's version, the sources and energy.json. */
 const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ v: LEDGER_VERSION, s, file })).digest("hex").slice(0, 16);
 const entityOf = (p: PriceSpec): string | undefined => ("entity" in p ? p.entity : undefined);
@@ -250,6 +252,33 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
     return [event];
   };
 
+  // ---- hot water for days the boiler's states do not split: the last summer's daily gas ----
+  let summer: { at: number; m3: number | undefined } | undefined;
+  const hotWaterPerDay = async (s: ResolvedSources): Promise<number | undefined> => {
+    if (file.heatPump.hotWaterM3PerDay !== undefined) return file.heatPump.hotWaterM3PerDay;
+    if (summer !== undefined && now() - summer.at < 24 * HOUR) return summer.m3;
+    const t = today();
+    const year = Number(t.slice(0, 4)) - (t.slice(5, 7) >= "09" ? 0 : 1);
+    const ids = s.gas.map((g) => g.id);
+    let m3: number | undefined;
+    if (ids.length > 0) {
+      const stats = await deps.ha.statisticsDuringPeriod({
+        statisticIds: ids,
+        startTime: new Date(dayStart(`${year}-06-01`, zone())).toISOString(),
+        endTime: new Date(dayStart(`${year}-09-01`, zone())).toISOString(),
+        period: "day",
+        types: ["change"],
+        units: UNITS,
+      });
+      const perDay = new Map<number, number>();
+      for (const rows of Object.values(stats)) for (const r of rows) if (typeof r.change === "number" && r.change >= 0) perDay.set(parseTime(r.start), (perDay.get(parseTime(r.start)) ?? 0) + r.change);
+      const vs = [...perDay.values()].sort((a, b) => a - b);
+      if (vs.length >= 14) m3 = vs[Math.floor(vs.length / 2)]!;
+    }
+    summer = { at: now(), m3 };
+    return m3;
+  };
+
   // ---- the gas split and the showers of a day ----
   const sharesOf = (s: ResolvedSources, from: number, to: number): { hotWater: number; heating: number } | undefined => {
     const a = s.attribution;
@@ -380,6 +409,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       }
     }
     const adder = await gasAdder(s).catch(() => undefined);
+    const hotWaterM3 = await hotWaterPerDay(s).catch(() => undefined);
     const oldest = s.attribution === undefined ? undefined : deps.signals?.query({ entityId: s.attribution.gas, order: "asc", limit: 1 })[0]?.at;
     const events: DayClosed[] = [];
     for (const d of days) {
@@ -403,6 +433,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
         known: { ...known, ...(adder !== undefined ? { gasAdder: adder } : {}), fallback: fallbackFor(s, dFrom, means, false) },
         ...(shares !== undefined ? { gasShares: shares } : {}),
         ...(showers !== undefined ? { showers } : {}),
+        ...(hotWaterM3 !== undefined ? { hotWaterM3 } : {}),
         complete: true,
       });
       const flags = [...res.flags];
@@ -441,6 +472,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
     const adder = await gasAdder(s).catch(() => undefined);
     const showers = showersOf(from, t);
     const shares = sharesOf(s, from, t);
+    const hotWaterM3 = await hotWaterPerDay(s).catch(() => undefined);
     const res = computeDay({
       key,
       from,
@@ -452,6 +484,7 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       known: { ...known, electricity, ...(adder !== undefined ? { gasAdder: adder } : {}), fallback: fallbackFor(s, t, means, true) },
       ...(shares !== undefined ? { gasShares: shares } : {}),
       ...(showers !== undefined ? { showers } : {}),
+      ...(hotWaterM3 !== undefined ? { hotWaterM3 } : {}),
       complete: false,
     });
     todayCache = { at: now(), key, ledger: res.ledger, rows: res.hours, flags: res.flags };
@@ -641,7 +674,37 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       return { date, hours: res.hours };
     },
 
+    async seasons() {
+      const t = today();
+      const y = Number(t.slice(0, 4));
+      const m = t.slice(5, 7);
+      // The season running (October to April), else the one that ended in April.
+      const current = m >= "10" ? y : y - 1;
+      const out: EnergySeasons["seasons"] = [];
+      for (const start of [current - 1, current]) {
+        const from = `${start}-10-01`;
+        const to = `${start + 1}-04-30`;
+        const parts: Ledger[] = [];
+        for (const d of daysBetween(from, to > t ? t : to)) {
+          const l = await ledgerOf(d);
+          if (l !== undefined) parts.push(l);
+        }
+        if (parts.length === 0) continue;
+        const key = `${start}–${String(start + 1).slice(2)}`;
+        out.push({ key, from, to, ledger: sumLedgers(key, dayStart(from, zone()), dayStart(addDays(to, 1), zone()), parts) });
+      }
+      const yTo = addDays(t, -1);
+      const yFrom = addDays(t, -365);
+      const yParts = daysBetween(yFrom, yTo).map((d) => closed.get(d)?.ledger).filter((l): l is Ledger => l !== undefined);
+      const year = yParts.length === 0 ? undefined : { from: yFrom, to: yTo, ledger: sumLedgers("12 months", dayStart(yFrom, zone()), dayStart(t, zone()), yParts) };
+      const s = await sources();
+      const hotWaterM3 = await hotWaterPerDay(s).catch(() => undefined);
+      const { kWhPerM3, cop, hotWaterCop } = file.heatPump;
+      return { seasons: out, ...(year !== undefined ? { year } : {}), assumptions: { kWhPerM3, cop, hotWaterCop, hotWaterM3PerDay: hotWaterM3 ?? null } };
+    },
+
     configure(next) {
+      summer = undefined;
       // The days closed with the old energy.json are closed again on the next tick.
       file = next;
       prefs = undefined;

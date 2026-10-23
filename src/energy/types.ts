@@ -46,6 +46,25 @@ export interface Ledger {
   degreeDays?: number;
   /** Some hour was priced from an estimate (no price known for it). */
   estimated: boolean;
+  /** The boiler's heat, and what the same heat would cost from a heat pump instead (energy.json heatPump). */
+  heat?: HeatLedger;
+}
+
+/** The gas route against an all-electric one: the boiler's heat made by a heat pump, gas disconnected. */
+export interface HeatLedger {
+  /** Heat the gas made, kWh (m³ × energy.json's kWh per m³): for the house, and for hot water. */
+  spaceKwh: number;
+  hotWaterKwh: number;
+  /** How the gas was split: by the boiler's states (measured), at the summer's daily gas for hot water (assumed), or both in a period. */
+  split: "measured" | "assumed" | "mixed";
+  /** What the gas route costs: the gas, and the gas connection's fixed charges, €. */
+  gasCost: number;
+  gasFixed: number;
+  /** The heat pump instead: its electricity, each hour at the COP of the hour's outdoor temperature (hot water at its own), and its cost at the hour's import price. */
+  heatPumpKwh: number;
+  heatPumpCost: number;
+  /** gasCost + gasFixed − heatPumpCost: what the all-electric route saves (negative: what it costs more). */
+  saving: number;
 }
 
 /** One hour: quantities, the prices it was priced at, and the cost. */
@@ -130,6 +149,22 @@ export interface EnergyPeriods {
   period: "day" | "week" | "month" | "year";
   /** Oldest first; the current period includes today so far. */
   rows: Ledger[];
+}
+
+/** GET api/energy/seasons: the heating seasons (October to April), the current one so far. */
+export interface EnergySeasons {
+  seasons: Array<{
+    /** "2025–26" */
+    key: string;
+    /** The first and the last day, YYYY-MM-DD. */
+    from: string;
+    to: string;
+    ledger: Ledger;
+  }>;
+  /** The last 365 closed days: the gas connection is paid all year, and hot water heated in summer too. */
+  year?: { from: string; to: string; ledger: Ledger };
+  /** The heat pump energy.json assumes. */
+  assumptions: { kWhPerM3: number; cop: Array<[number, number]>; hotWaterCop: number; hotWaterM3PerDay: number | null };
 }
 
 /** GET api/energy/hours?date=YYYY-MM-DD */

@@ -378,3 +378,28 @@ export function flagLabel(kind: string): string {
   };
   return LABEL[kind] ?? kind.replace(/_/g, " ");
 }
+
+// ---- heat pump instead of gas ----
+
+/** A season's verdict: the gas route (gas for heat and hot water, the gas connection) against a heat pump, and per degree day. */
+export function seasonVerdict(l: Ledger): { gasRoute: number; heatPump: number; saving: number; perDegreeDay: number | null; heatKwh: number } | null {
+  const h = l.heat;
+  if (h === undefined) return null;
+  const gasRoute = h.gasCost + h.gasFixed;
+  return {
+    gasRoute,
+    heatPump: h.heatPumpCost,
+    saving: h.saving,
+    perDegreeDay: l.degreeDays !== undefined && l.degreeDays > 0 ? h.saving / l.degreeDays : null,
+    heatKwh: h.spaceKwh + h.hotWaterKwh,
+  };
+}
+
+/** "COP 2.6 at −7 °C to 5.5 at 20 °C" */
+export function copLine(cop: Array<[number, number]>): string {
+  const first = cop[0];
+  const last = cop.at(-1);
+  if (first === undefined || last === undefined) return "";
+  const t = (v: number) => `${v < 0 ? "−" : ""}${Math.abs(v)} °C`;
+  return first === last ? `COP ${first[1]}` : `COP ${first[1]} at ${t(first[0])} to ${last[1]} at ${t(last[0])}`;
+}

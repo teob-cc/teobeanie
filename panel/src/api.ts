@@ -6,7 +6,7 @@
 
 import type { HeuristicInstance } from "./decisions";
 import type { EnergyToday, HouseView } from "../../src/house/view";
-import type { EnergyHours, EnergyOverview, EnergyPeriods } from "../../src/energy/types";
+import type { EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons } from "../../src/energy/types";
 import type { ParamField } from "../../src/kernel/params";
 
 export interface TimelineCard {
@@ -366,6 +366,8 @@ export const api = {
     getJson<EnergyPeriods>(`api/energy/periods?${qs({ period, from, to })}`),
   /** One local date's hours. */
   energyHours: (date: string) => getJson<EnergyHours>(`api/energy/hours?${qs({ date })}`),
+  /** The heating seasons with the heat pump route. */
+  energySeasons: () => getJson<EnergySeasons>("api/energy/seasons"),
   heuristics: () => getJson<{ instances: HeuristicInstance[]; reload?: ReloadOutcome | null }>("api/heuristics"),
   /** Re-read heuristics.json, allowlist.json and tiles.json; a rejection is an outcome too. */
   reloadConfig: async (): Promise<ReloadOutcome> => {

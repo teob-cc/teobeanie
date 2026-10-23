@@ -8,7 +8,7 @@
 // and heating by which of the boiler's states was on when the meter moved. Pure.
 import { daysInYear } from "./calendar.js";
 import { tariffOn, type EnergyFile, type Metered, type PriceSpec, type ResolvedSources } from "./config.js";
-import type { DataFlag, DeviceUse, HourRow, Ledger } from "./types.js";
+import type { DataFlag, DeviceUse, HeatLedger, HourRow, Ledger } from "./types.js";
 
 /** statistics_during_period, by id: hour start → value. */
 export interface HourlyStats {
@@ -76,6 +76,8 @@ export interface DayInput {
   /** The shares of the day's gas that heated water and the house (0..1 each), when attributed. */
   gasShares?: { hotWater: number; heating: number };
   showers?: NonNullable<Ledger["showers"]>;
+  /** Hot water per day, m³, for a day the boiler's states do not split (the heat pump route). */
+  hotWaterM3?: number;
   complete: boolean;
 }
 
@@ -132,13 +134,19 @@ export function computeDay(input: DayInput): DayResult {
   const devices = new Map<string, { kWh: number; cost: number }>();
   let importKwh = 0, exportKwh = 0, importCost = 0, exportCredit = 0, solarKwh = 0, gasM3 = 0, gasCost = 0, waterM3 = 0, waterCost = 0;
   const pricedNone = new Set<string>();
+  const hourGas: number[] = [];
+  const hourPrice: Array<number | null> = [];
   for (const hour of input.hours) {
     hourEstimated = false;
     let hImport = 0, hExport = 0, hImportCost = 0, hCredit = 0, hGas = 0, hGasCost = 0, hWater = 0, hWaterCost = 0;
-    const mainPrice = sources.imports[0] === undefined ? null : price(sources.imports[0].price, "electricity", hour);
+    // The import is paid at the price and the supplier's markup; net metering credits the price alone.
+    const markup = tariff.importMarkup ?? 0;
+    const basePrice = sources.imports[0] === undefined ? null : price(sources.imports[0].price, "electricity", hour);
+    const mainPrice = basePrice === null ? null : basePrice + markup;
     for (const m of sources.imports) {
       const q = qty(m.id, hour, "kWh");
-      const p = m === sources.imports[0] ? mainPrice : price(m.price, "electricity", hour);
+      const base = m === sources.imports[0] ? basePrice : price(m.price, "electricity", hour);
+      const p = base === null ? null : base + markup;
       if (p === null && q > 0) pricedNone.add(m.id);
       hImport += q;
       hImportCost += q * (p ?? 0);
@@ -146,7 +154,7 @@ export function computeDay(input: DayInput): DayResult {
     let rowExportPrice: number | null = null;
     for (const m of sources.exports) {
       const q = qty(m.id, hour, "kWh");
-      const p = exportPriceOf(m, hour, mainPrice);
+      const p = exportPriceOf(m, hour, basePrice);
       rowExportPrice ??= p;
       hExport += q;
       hCredit += q * (p ?? 0);
@@ -175,6 +183,8 @@ export function computeDay(input: DayInput): DayResult {
       acc.cost += q * (mainPrice ?? 0);
       devices.set(d.id, acc);
     }
+    hourGas.push(hGas);
+    hourPrice.push(mainPrice);
     rows.push({
       start: hour,
       importKwh: round(hImport),
@@ -208,7 +218,12 @@ export function computeDay(input: DayInput): DayResult {
     gas.hotWaterM3 = round(gasM3 * input.gasShares.hotWater);
     gas.heatingM3 = round(gasM3 * input.gasShares.heating);
   }
-  const degreeDays = degreeDaysOf(input.hours, sources.outdoorTemperature === undefined ? undefined : stats.mean.get(sources.outdoorTemperature), file.degreeDays.base);
+  const temps = sources.outdoorTemperature === undefined ? undefined : stats.mean.get(sources.outdoorTemperature);
+  const degreeDays = degreeDaysOf(input.hours, temps, file.degreeDays.base);
+  const heat =
+    sources.gas.length === 0
+      ? undefined
+      : heatOf({ hours: input.hours, gas: hourGas, prices: hourPrice, temps, gasM3, gasCost, gasFixed: tariff.fixedPerDay?.gas ?? 0, shares: input.gasShares, hotWaterM3: input.hotWaterM3, pump: file.heatPump });
   const total = importCost - exportCredit + gasCost + waterCost + fixed;
   const ledger: Ledger = {
     key: input.key,
@@ -226,8 +241,70 @@ export function computeDay(input: DayInput): DayResult {
     total: round(total, 2),
     ...(degreeDays !== undefined ? { degreeDays: round(degreeDays, 2) } : {}),
     estimated,
+    ...(heat !== undefined ? { heat } : {}),
   };
   return { ledger, hours: rows, flags };
+}
+
+/** The COP at an outdoor temperature: straight lines between the given points, flat beyond them. */
+export function copAt(cop: Array<[number, number]>, t: number): number {
+  const first = cop[0]!;
+  const last = cop.at(-1)!;
+  if (t <= first[0]) return first[1];
+  if (t >= last[0]) return last[1];
+  for (let i = 1; i < cop.length; i++) {
+    const [t1, c1] = cop[i]!;
+    const [t0, c0] = cop[i - 1]!;
+    if (t <= t1) return c0 + ((c1 - c0) * (t - t0)) / (t1 - t0);
+  }
+  return last[1];
+}
+
+/**
+ * The day's gas as heat, and the same heat from a heat pump: each hour's gas is split as
+ * the day's (by the boiler's states, else hot water at a fixed daily amount spread over the
+ * gas hours), the space heat at the COP of the hour's outdoor temperature (the day's mean
+ * when an hour has none), the hot water at its own COP, priced at the hour's import price.
+ */
+export function heatOf(i: {
+  hours: number[];
+  gas: number[];
+  prices: Array<number | null>;
+  temps: Map<number, number> | undefined;
+  gasM3: number;
+  gasCost: number;
+  gasFixed: number;
+  shares: { hotWater: number; heating: number } | undefined;
+  hotWaterM3: number | undefined;
+  pump: EnergyFile["heatPump"];
+}): HeatLedger {
+  const hotShare = i.shares !== undefined ? i.shares.hotWater : i.gasM3 > 0 && i.hotWaterM3 !== undefined ? Math.min(1, i.hotWaterM3 / i.gasM3) : 0;
+  const known = i.hours.map((h) => i.temps?.get(h)).filter((v): v is number => v !== undefined);
+  const dayMean = known.length > 0 ? known.reduce((a, b) => a + b, 0) / known.length : 7;
+  const lastPrice = [...i.prices].reverse().find((p): p is number => p !== null) ?? 0;
+  let space = 0, hot = 0, kWh = 0, cost = 0;
+  i.hours.forEach((h, k) => {
+    const g = i.gas[k] ?? 0;
+    if (g <= 0) return;
+    const hw = g * hotShare * i.pump.kWhPerM3;
+    const sp = g * (1 - hotShare) * i.pump.kWhPerM3;
+    const e = sp / copAt(i.pump.cop, i.temps?.get(h) ?? dayMean) + hw / i.pump.hotWaterCop;
+    space += sp;
+    hot += hw;
+    kWh += e;
+    cost += e * (i.prices[k] ?? lastPrice);
+  });
+  const saving = i.gasCost + i.gasFixed - cost;
+  return {
+    spaceKwh: round(space, 2),
+    hotWaterKwh: round(hot, 2),
+    split: i.shares !== undefined ? "measured" : "assumed",
+    gasCost: round(i.gasCost, 2),
+    gasFixed: round(i.gasFixed, 2),
+    heatPumpKwh: round(kWh, 2),
+    heatPumpCost: round(cost, 2),
+    saving: round(saving, 2),
+  };
 }
 
 /** max(0, base − the day's mean outdoor temperature), from at least half the day's hourly means. */
@@ -244,6 +321,8 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
   const devices = new Map<string, { id: string; name: string; use: DeviceUse; kWh: number; cost: number }>();
   let showers: Ledger["showers"];
   let hot = 0, heating = 0, attributed = false, dd = 0, ddKnown = false;
+  let heat: HeatLedger | undefined;
+  const splits = new Set<HeatLedger["split"]>();
   const out: Ledger = {
     key,
     from,
@@ -296,6 +375,17 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
       dd += p.degreeDays;
     }
     out.estimated ||= p.estimated;
+    if (p.heat !== undefined) {
+      heat ??= { spaceKwh: 0, hotWaterKwh: 0, split: p.heat.split, gasCost: 0, gasFixed: 0, heatPumpKwh: 0, heatPumpCost: 0, saving: 0 };
+      splits.add(p.heat.split);
+      heat.spaceKwh += p.heat.spaceKwh;
+      heat.hotWaterKwh += p.heat.hotWaterKwh;
+      heat.gasCost += p.heat.gasCost;
+      heat.gasFixed += p.heat.gasFixed;
+      heat.heatPumpKwh += p.heat.heatPumpKwh;
+      heat.heatPumpCost += p.heat.heatPumpCost;
+      heat.saving += p.heat.saving;
+    }
   }
   const r2 = (n: number) => round(n, 2);
   const r4 = (n: number) => round(n);
@@ -308,6 +398,18 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
   out.fixed = r2(out.fixed);
   out.total = r2(out.total);
   if (ddKnown) out.degreeDays = r2(dd);
+  if (heat !== undefined) {
+    out.heat = {
+      spaceKwh: r2(heat.spaceKwh),
+      hotWaterKwh: r2(heat.hotWaterKwh),
+      split: splits.size > 1 ? "mixed" : heat.split,
+      gasCost: r2(heat.gasCost),
+      gasFixed: r2(heat.gasFixed),
+      heatPumpKwh: r2(heat.heatPumpKwh),
+      heatPumpCost: r2(heat.heatPumpCost),
+      saving: r2(heat.saving),
+    };
+  }
   return out;
 }
 

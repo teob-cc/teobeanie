@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import type { Ledger, PricePoint } from "../src/energy/types.js";
 import {
   addYears,
+  copLine,
+  seasonVerdict,
   bandChip,
   byCarrier,
   byUse,
@@ -240,5 +242,20 @@ describe("showers", () => {
     const s = { count: 2, litres: 80, gasM3: 0.4, cost: 0.6 };
     expect(sumShowers([ledger({ showers: s }), ledger(), ledger({ showers: s })])).toEqual({ count: 4, litres: 160, gasM3: 0.8, cost: 1.2 });
     expect(sumShowers([ledger(), ledger()])).toBeNull();
+  });
+});
+
+describe("heat pump instead of gas", () => {
+  it("weighs the gas route against the heat pump, per degree day", () => {
+    const l = {
+      degreeDays: 200,
+      heat: { spaceKwh: 9000, hotWaterKwh: 1000, split: "measured", gasCost: 1000, gasFixed: 190, heatPumpKwh: 3000, heatPumpCost: 800, saving: 390 },
+    } as unknown as Ledger;
+    expect(seasonVerdict(l)).toEqual({ gasRoute: 1190, heatPump: 800, saving: 390, perDegreeDay: 1.95, heatKwh: 10000 });
+    expect(seasonVerdict({} as Ledger)).toBeNull();
+  });
+
+  it("says the COP range plainly", () => {
+    expect(copLine([[-7, 2.6], [12, 5]])).toBe("COP 2.6 at −7 °C to 5 at 12 °C");
   });
 });

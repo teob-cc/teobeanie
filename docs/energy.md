@@ -55,6 +55,45 @@ What only a closed day can keep:
 - **Past prices** fetched from the price history, journaled as `PricesRecorded` in
   `teob-energy/prices`.
 
+## A heat pump instead of gas
+
+Each day the ledger also prices an all-electric alternative: the boiler's heat made by a
+heat pump, with the gas connection gone. The steps:
+
+- The day's gas becomes heat at `heatPump.kWhPerM3` (default 8.8: a Groningen-quality m³,
+  9.77 kWh upper value, in a condensing boiler at about 90 %).
+- That heat is split into heat for the house and heat for hot water.
+  - Where the boiler's states split the gas, the measured split is used.
+  - Otherwise hot water is the last summer's median daily gas (`hotWaterM3PerDay` overrides
+    it), spread over the day's gas hours.
+- Each hour, the space heat is divided by the COP at that hour's outdoor temperature
+  (`heatPump.cop`, `[outdoor °C, COP]` points with straight lines between), and the hot
+  water by `hotWaterCop`.
+- The result is priced at that hour's import price, the supplier's markup included.
+- The comparison is the gas route (the gas, plus the tariff's `fixedPerDay.gas`) against
+  the heat pump's electricity. The difference is `heat.saving`.
+
+The defaults describe an air-to-water heat pump on a low-temperature system:
+
+| Outdoor | −7 °C | 2 °C | 7 °C | 12 °C | 20 °C |
+|---|---|---|---|---|---|
+| COP | 2.6 | 3.4 | 4.3 | 5.0 | 5.5 |
+
+Hot water is at COP 2.8. Heat pumps already in the house (air conditioners) stay as they
+are: their electricity is in the ledger both ways.
+
+`GET api/energy/seasons` (the panel's "Heat pump instead of gas?" band, and the MCP
+`energy` view `seasons`) holds:
+
+- the heating seasons, October to April: the last one and the current one so far;
+- the last 365 closed days, which is what decides, since the gas connection is paid all
+  year and water is heated in summer too;
+- the assumptions.
+
+The investment is not in it. A yearly saving times the years it should pay back in is
+what the heat pump, its installation and closing the gas connection may cost, less any
+subsidy.
+
 ## The price history
 
 With `"priceHistory": { "source": "energyzero" }` and Home Assistant's EnergyZero
@@ -102,13 +141,14 @@ is optional.
 
 | Key | Meaning |
 |---|---|
-| `tariffs` | Periods, each from its date on. A later period overrides the fields it names and keeps the others. `fixedPerDay` is € per day per carrier. `taxCreditPerYear` is spread over the year's days. `exportPrice` is `"import"` (net metering: the import price), a fixed €/kWh, or a price entity. |
+| `tariffs` | Periods, each from its date on. A later period overrides the fields it names and keeps the others. `fixedPerDay` is € per day per carrier. `taxCreditPerYear` is spread over the year's days. `importMarkup` is the supplier's € per imported kWh when the price entity leaves it out (export is credited without it). `exportPrice` is `"import"` (net metering: the import price), a fixed €/kWh, or a price entity. |
 | `priceHistory` | `source: "energyzero"`; `configEntry` names the integration's entry when there are several; `gasAdder` is € per m³ on top of the market gas price. |
 | `water`, `gas` | A meter (`stat`, a statistic id) and its `price` (an entity, or a fixed price per m³), for one HA's energy dashboard does not list or prices differently. |
 | `attribution` | The gas meter (default: the energy dashboard's gas source), and the binary sensors that are on while the boiler heats water (`hotWater`) and the house (`heating`). `lagMin` is how late the meter reports, default 5. |
 | `devices` | Per statistic id or pattern (`*`): `use` (`heating`, `cooling`, `hot_water`, `ventilation`, `other`), `name`, `hidden`. An exact id HA's dashboard does not list adds that device. Without a use, one is guessed from the name ("cooling", "heat", "water heater", "ventilation"). |
 | `degreeDays` | `base` °C; `temperature`, an outdoor temperature other than allowlist.json's. |
 | `limits` | The most an hour can use; more is a counter's artefact. |
+| `heatPump` | The all-electric alternative: `kWhPerM3`, `cop` (`[[outdoor °C, COP], …]`), `hotWaterCop`, `hotWaterM3PerDay`. |
 
 ## API and tool
 

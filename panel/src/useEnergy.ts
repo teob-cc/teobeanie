@@ -1,10 +1,11 @@
 // useEnergy.ts — the Energy tab's data: the overview (on mount, every 5 minutes while
-// the tab is in view, and on every SSE reconnect), the periods and a day's hours on demand.
+// the tab is in view, and on every SSE reconnect), the periods and a day's hours on demand,
+// the heating seasons with each overview.
 // A route an older add-on does not serve answers 404: the state says "missing", not an error.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, HttpError } from "./api";
-import type { EnergyHours, EnergyOverview, EnergyPeriods, Ledger } from "../../src/energy/types";
+import type { EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons, Ledger } from "../../src/energy/types";
 import { earlierKey, periodRange, yearEarlierRange, type Period } from "./energy";
 
 const OVERVIEW_MS = 5 * 60_000;
@@ -183,4 +184,26 @@ export function useHours(date: string | null, stamp: number | null): HoursData {
     };
   }, [date, stamp]);
   return { hours: hours !== null && hours.date === date ? hours : null, state, error };
+}
+
+/** GET api/energy/seasons: once the tab has opened, again with each overview (`stamp`). */
+export function useSeasons(enabled: boolean, stamp: number | null): { seasons: EnergySeasons | null; state: LoadState } {
+  const [seasons, setSeasons] = useState<EnergySeasons | null>(null);
+  const [state, setState] = useState<LoadState>("loading");
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    api
+      .energySeasons()
+      .then((s) => {
+        if (!live) return;
+        setSeasons(s);
+        setState("ready");
+      })
+      .catch((e) => live && setState(stateOf(e)));
+    return () => {
+      live = false;
+    };
+  }, [enabled, stamp]);
+  return { seasons, state };
 }

@@ -36,6 +36,20 @@ export interface Tariff {
   taxCreditPerYear?: number;
   /** The export price from this date: "import" (net metering), a fixed €/kWh, or a price entity. Default: HA's export price. */
   exportPrice?: "import" | number | string;
+  /** The supplier's markup on each imported kWh, € (when the price entity leaves it out). */
+  importMarkup?: number;
+}
+
+/** The heat pump the all-electric route assumes: what a m³ of gas heats, and its COP by outdoor temperature. */
+export interface HeatPumpAssumption {
+  /** kWh of heat per m³ of gas: the gas's calorific value times the boiler's efficiency. */
+  kWhPerM3: number;
+  /** [outdoor °C, COP], ascending; straight lines between, flat beyond. */
+  cop: Array<[number, number]>;
+  /** The COP for hot water. */
+  hotWaterCop: number;
+  /** Hot water per day, m³, for days whose gas the boiler's states do not split; default the last summer's median daily gas. */
+  hotWaterM3PerDay?: number;
 }
 
 export interface EnergyFile {
@@ -50,13 +64,25 @@ export interface EnergyFile {
   degreeDays: { base: number; temperature?: string };
   /** An hour above these is a counter's artefact, not use. */
   limits: { maxKwhPerHour: number; maxM3PerHour: number };
+  heatPump: HeatPumpAssumption;
 }
+
+/**
+ * A condensing boiler on a Groningen-quality m³ (9.77 kWh upper value) at about 90 %; an
+ * air-to-water heat pump on a low-temperature system (35 °C flow), and hot water at 55 °C.
+ */
+export const DEFAULT_HEAT_PUMP: HeatPumpAssumption = {
+  kWhPerM3: 8.8,
+  cop: [[-7, 2.6], [2, 3.4], [7, 4.3], [12, 5.0], [20, 5.5]],
+  hotWaterCop: 2.8,
+};
 
 export const EMPTY_ENERGY_FILE: EnergyFile = {
   tariffs: [],
   devices: {},
   degreeDays: { base: 18 },
   limits: { maxKwhPerHour: 25, maxM3PerHour: 10 },
+  heatPump: DEFAULT_HEAT_PUMP,
 };
 
 const USES: DeviceUse[] = ["heating", "cooling", "hot_water", "ventilation", "other"];
@@ -77,7 +103,7 @@ const priceOf = (v: unknown, where: string): string | number => (typeof v === "n
 export function parseEnergyFile(raw: unknown, path = "energy.json"): EnergyFile {
   if (raw === undefined) return EMPTY_ENERGY_FILE;
   if (!isObj(raw)) throw new Error(`${path}: expected an object`);
-  const out: EnergyFile = { ...EMPTY_ENERGY_FILE, tariffs: [], devices: {}, degreeDays: { ...EMPTY_ENERGY_FILE.degreeDays }, limits: { ...EMPTY_ENERGY_FILE.limits } };
+  const out: EnergyFile = { ...EMPTY_ENERGY_FILE, tariffs: [], devices: {}, degreeDays: { ...EMPTY_ENERGY_FILE.degreeDays }, limits: { ...EMPTY_ENERGY_FILE.limits }, heatPump: { ...DEFAULT_HEAT_PUMP } };
   if (raw.tariffs !== undefined) {
     if (!Array.isArray(raw.tariffs)) throw new Error(`${path}: tariffs must be an array`);
     out.tariffs = raw.tariffs.map((t, i) => {
@@ -92,6 +118,7 @@ export function parseEnergyFile(raw: unknown, path = "energy.json"): EnergyFile 
       }
       if (t.taxCreditPerYear !== undefined) tariff.taxCreditPerYear = num(t.taxCreditPerYear, `${w}.taxCreditPerYear`);
       if (t.exportPrice !== undefined) tariff.exportPrice = t.exportPrice === "import" ? "import" : priceOf(t.exportPrice, `${w}.exportPrice`);
+      if (t.importMarkup !== undefined) tariff.importMarkup = num(t.importMarkup, `${w}.importMarkup`);
       return tariff;
     });
     out.tariffs.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
@@ -144,6 +171,25 @@ export function parseEnergyFile(raw: unknown, path = "energy.json"): EnergyFile 
     if (!isObj(d)) throw new Error(`${path}: degreeDays must be an object`);
     if (d.base !== undefined) out.degreeDays.base = num(d.base, `${path}: degreeDays.base`);
     if (d.temperature !== undefined) out.degreeDays.temperature = entity(d.temperature, `${path}: degreeDays.temperature`);
+  }
+  if (raw.heatPump !== undefined) {
+    const h = raw.heatPump;
+    const w = `${path}: heatPump`;
+    if (!isObj(h)) throw new Error(`${w} must be an object`);
+    if (h.kWhPerM3 !== undefined) out.heatPump.kWhPerM3 = num(h.kWhPerM3, `${w}.kWhPerM3`);
+    if (h.hotWaterCop !== undefined) out.heatPump.hotWaterCop = num(h.hotWaterCop, `${w}.hotWaterCop`);
+    if (h.hotWaterM3PerDay !== undefined) out.heatPump.hotWaterM3PerDay = num(h.hotWaterM3PerDay, `${w}.hotWaterM3PerDay`);
+    if (h.cop !== undefined) {
+      if (!Array.isArray(h.cop) || h.cop.length === 0) throw new Error(`${w}.cop must be a list of [outdoor °C, COP]`);
+      out.heatPump.cop = h.cop.map((p, i) => {
+        if (!Array.isArray(p) || p.length !== 2) throw new Error(`${w}.cop[${i}] must be [outdoor °C, COP]`);
+        const c = num(p[1], `${w}.cop[${i}][1]`);
+        if (c <= 0) throw new Error(`${w}.cop[${i}]: a COP must be above 0`);
+        return [num(p[0], `${w}.cop[${i}][0]`), c] as [number, number];
+      });
+      out.heatPump.cop.sort((a, b) => a[0] - b[0]);
+    }
+    if (out.heatPump.kWhPerM3 <= 0 || out.heatPump.hotWaterCop <= 0) throw new Error(`${w}: kWhPerM3 and hotWaterCop must be above 0`);
   }
   if (raw.limits !== undefined) {
     const l = raw.limits;
@@ -275,6 +321,7 @@ export function tariffOn(tariffs: Tariff[], day: string): Omit<Tariff, "from"> {
     if (p.fixedPerDay !== undefined) t.fixedPerDay = { ...t.fixedPerDay, ...p.fixedPerDay };
     if (p.taxCreditPerYear !== undefined) t.taxCreditPerYear = p.taxCreditPerYear;
     if (p.exportPrice !== undefined) t.exportPrice = p.exportPrice;
+    if (p.importMarkup !== undefined) t.importMarkup = p.importMarkup;
   }
   return t;
 }

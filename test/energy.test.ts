@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { addDays, dayKey, dayStart, daysBetween, nextPeriodFirstDay, periodFirstDay, weekKey } from "../src/energy/calendar.js";
 import { EMPTY_ENERGY_FILE, guessUse, parseEnergyFile, resolveSources, tariffOn, type EnergyPrefs } from "../src/energy/config.js";
-import { computeDay, gasShares, onSpans, priceBand, projectDay, sumLedgers, type HourlyStats, type PriceKnowledge } from "../src/energy/ledger.js";
+import { computeDay, copAt, gasShares, heatOf, onSpans, priceBand, projectDay, sumLedgers, type HourlyStats, type PriceKnowledge } from "../src/energy/ledger.js";
+import { DEFAULT_HEAT_PUMP } from "../src/energy/config.js";
 import { createEnergyService } from "../src/energy/service.js";
 import { ENERGY_CATEGORY, type EnergyEvent } from "../src/energy/journal.js";
 import type { HourRow } from "../src/energy/types.js";
@@ -238,6 +239,61 @@ describe("computeDay", () => {
     });
     expect(r.ledger.gas).toMatchObject({ m3: 2, hotWaterM3: 0.5, heatingM3: 1 });
     expect(r.ledger.degreeDays).toBe(8);
+  });
+});
+
+describe("the heat pump route", () => {
+  it("reads a COP between the given points, flat beyond them", () => {
+    const cop: Array<[number, number]> = [[-7, 2.6], [2, 3.4], [7, 4.3]];
+    expect(copAt(cop, -20)).toBe(2.6);
+    expect(copAt(cop, 2)).toBe(3.4);
+    expect(copAt(cop, 4.5)).toBeCloseTo(3.85);
+    expect(copAt(cop, 30)).toBe(4.3);
+  });
+
+  it("makes the gas's heat with a heat pump, hour by hour, and counts the gas connection's fixed charges as saved", () => {
+    const pump = { ...DEFAULT_HEAT_PUMP, kWhPerM3: 10, cop: [[0, 2], [10, 4]] as Array<[number, number]>, hotWaterCop: 2.5 };
+    const h = heatOf({
+      hours: [0, HOUR],
+      gas: [1, 1],
+      prices: [0.3, 0.2],
+      temps: new Map([[0, 0], [HOUR, 10]]),
+      gasM3: 2,
+      gasCost: 3.6,
+      gasFixed: 1,
+      shares: { hotWater: 0.5, heating: 0.5 },
+      hotWaterM3: undefined,
+      pump,
+    });
+    // Per hour 5 kWh space heat and 5 kWh hot water: 5/2 + 5/2.5 = 4.5 kWh at 0.3, then 5/4 + 2 = 3.25 kWh at 0.2.
+    expect(h).toEqual({ spaceKwh: 10, hotWaterKwh: 10, split: "measured", gasCost: 3.6, gasFixed: 1, heatPumpKwh: 7.75, heatPumpCost: 2, saving: 2.6 });
+  });
+
+  it("takes hot water at the summer's daily gas when the day is not split", () => {
+    const h = heatOf({ hours: [0], gas: [2], prices: [0.25], temps: undefined, gasM3: 2, gasCost: 3.7, gasFixed: 0, shares: undefined, hotWaterM3: 0.5, pump: { ...DEFAULT_HEAT_PUMP, kWhPerM3: 8 } });
+    expect(h.split).toBe("assumed");
+    expect(h.hotWaterKwh).toBe(4);
+    expect(h.spaceKwh).toBe(12);
+  });
+
+  it("adds the supplier's markup to the import, and credits the export without it", () => {
+    const file = parseEnergyFile({ tariffs: [{ from: "2026-01-01", importMarkup: 0.02, exportPrice: "import", fixedPerDay: { gas: 1.05 } }] });
+    const s = resolveSources(
+      { energy_sources: [{ type: "grid", stat_energy_from: "sensor.import_t1", stat_energy_to: "sensor.export_t1", entity_energy_price: "sensor.price_now" }, { type: "gas", stat_energy_from: "sensor.gas_meter", entity_energy_price: "sensor.gas_price" }] },
+      file,
+    );
+    const key = "2026-10-23";
+    const h = hoursOf(key)[12]!;
+    const r = computeDay({ key, from: dayStart(key, TZ), to: dayStart(addDays(key, 1), TZ), hours: [h], stats: stats({ "sensor.import_t1": { [h]: 2 }, "sensor.export_t1": { [h]: 1 }, "sensor.gas_meter": { [h]: 1 } }, { "sensor.price_now": { [h]: 0.25 }, "sensor.gas_price": { [h]: 1.8 } }), sources: s, file, known: noKnowledge(), hotWaterM3: 0, complete: true });
+    expect(r.ledger.electricity).toMatchObject({ importCost: 0.54, exportCredit: 0.25 });
+    expect(r.hours[0]!.price).toBeCloseTo(0.27);
+    expect(r.ledger.heat).toMatchObject({ gasCost: 1.8, gasFixed: 1.05, split: "assumed" });
+    expect(r.ledger.heat!.heatPumpCost).toBeCloseTo(r.ledger.heat!.heatPumpKwh * 0.27, 2);
+  });
+
+  it("checks energy.json's heat pump", () => {
+    expect(parseEnergyFile({ heatPump: { cop: [[7, 4], [-7, 2.5]], hotWaterM3PerDay: 0.3 } }).heatPump).toMatchObject({ cop: [[-7, 2.5], [7, 4]], hotWaterM3PerDay: 0.3, kWhPerM3: 8.8 });
+    expect(() => parseEnergyFile({ heatPump: { cop: [[7, 0]] } })).toThrow(/above 0/);
   });
 });
 
@@ -563,6 +619,24 @@ describe("createEnergyService", () => {
     // The hot-water spell 07:00–07:40 reaches the steps read at 07:30 and (with the meter's lag) 08:30: 2 of 24.
     expect(gasOf("2026-10-22").hotWaterM3).toBeCloseTo((2.4 * 2) / 24, 3);
     expect(gasOf("2026-10-21").hotWaterM3).toBeUndefined();
+  });
+
+  it("sums the heating seasons, October to April, with the heat pump route", async () => {
+    const { make } = service();
+    const svc = make();
+    svc.start();
+    await svc.catchUp();
+    const res = await svc.seasons();
+    expect(res.seasons.map((x) => x.key)).toEqual(["2026–27"]);
+    const season = res.seasons[0]!;
+    expect(season).toMatchObject({ from: "2026-10-01", to: "2027-04-30" });
+    expect(season.ledger.days).toBe(4);
+    expect(season.ledger.heat!.heatPumpKwh).toBeGreaterThan(0);
+    expect(season.ledger.heat!.saving).toBeCloseTo(season.ledger.heat!.gasCost + season.ledger.heat!.gasFixed - season.ledger.heat!.heatPumpCost, 1);
+    expect(res.assumptions.kWhPerM3).toBe(8.8);
+    // The closed days of the last 365: the 20th to the 22nd.
+    expect(res.year).toMatchObject({ from: "2025-10-23", to: "2026-10-22" });
+    expect(res.year!.ledger.days).toBe(3);
   });
 
   it("says there is nothing to show without sources", async () => {

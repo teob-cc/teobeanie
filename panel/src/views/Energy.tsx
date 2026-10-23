@@ -15,6 +15,7 @@ import {
   addDays,
   bandChip,
   byCarrier,
+  copLine,
   byUse,
   clock,
   flagLabel,
@@ -29,12 +30,13 @@ import {
   periodTitle,
   priceMarks,
   priceNow,
+  seasonVerdict,
   sumShowers,
   type MoneyRow,
   type Period,
 } from "../energy";
 import { useNow } from "../useHouse";
-import { useEnergy, useHours, usePeriods, type LoadState } from "../useEnergy";
+import { useEnergy, useHours, usePeriods, useSeasons, type LoadState } from "../useEnergy";
 import type { VerticalProps } from "../verticals";
 
 export function Energy({ connected, visible, house, onAvailable }: VerticalProps) {
@@ -70,6 +72,7 @@ export function Energy({ connected, visible, house, onAvailable }: VerticalProps
       <MoneyBand o={o} enabled={opened} selectedDay={day} onDay={setDay} />
       <PricesBand o={o} now={now} />
       <DayBand o={o} day={day} onDay={setDay} />
+      <HeatPumpBand enabled={opened} stamp={loadedAt} />
       <ShowersBand o={o} />
       {/* TODO(E3): a Comfort band (rooms against their setpoints, the boiler, the ventilation) belongs here, from its own lane. */}
       <DataBand o={o} />
@@ -355,6 +358,73 @@ function DayBand({ o, day, onDay }: { o: EnergyOverview; day: string | null; onD
           </details>
         </>
       )}
+    </Band>
+  );
+}
+
+// ---- heat pump instead of gas ----------------------------------------------------
+
+function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | null }) {
+  const { seasons, state } = useSeasons(enabled, stamp);
+  if (seasons === null) return state === "loading" ? null : <Band title="Heat pump instead of gas?"><Unavailable state={state} what="the heating seasons" error={null} /></Band>;
+  const rows = seasons.seasons.map((s) => ({ s, v: seasonVerdict(s.ledger) })).filter((r) => r.v !== null);
+  if (rows.length === 0) return null;
+  const current = rows.at(-1)!;
+  // The whole year decides: the gas connection is paid all year, and hot water heated in summer too.
+  const year = seasons.year === undefined ? null : { s: { key: "Last 12 months", from: seasons.year.from, to: seasons.year.to, ledger: seasons.year.ledger }, v: seasonVerdict(seasons.year.ledger) };
+  const all = year?.v != null && year.s.ledger.days >= 360 ? [...rows, year] : rows;
+  const yearly = year?.v != null && year.s.ledger.days >= 360 ? year : null;
+  const line = current.v!.saving >= 0 ? `saves ${fmtEur(current.v!.saving)} this season so far` : `costs ${fmtEur(-current.v!.saving)} more this season so far`;
+  const a = seasons.assumptions;
+  return (
+    <Band title="Heat pump instead of gas?" line={<span className="tnum">{line}</span>}>
+      <p className="muted small">
+        The boiler's heat, for the house and for hot water, made by a heat pump instead, each hour at that hour's outdoor temperature and price,
+        with the gas connection gone and its fixed charges saved.
+      </p>
+      <div className="etable-wrap">
+        <table className="etable tnum">
+          <thead>
+            <tr>
+              <th>Season</th>
+              <th>Days</th>
+              <th>Heat from gas</th>
+              <th>Gas route</th>
+              <th>Heat pump</th>
+              <th>Difference</th>
+              <th>Per degree day</th>
+            </tr>
+          </thead>
+          <tbody>
+            {all.map(({ s, v }) => (
+              <tr key={s.key}>
+                <td>
+                  {s.key}
+                  {s.ledger.heat!.split !== "measured" && <span className="muted small"> · {s.ledger.heat!.split === "assumed" ? "hot water assumed" : "partly assumed"}</span>}
+                  {s.ledger.estimated && <span className="muted small"> · ≈ prices</span>}
+                </td>
+                <td>{s.ledger.days}</td>
+                <td>{fmtKwh(v!.heatKwh)}</td>
+                <td title={`gas ${fmtEur(s.ledger.heat!.gasCost)} + gas connection ${fmtEur(s.ledger.heat!.gasFixed)}`}>{fmtEur(v!.gasRoute)}</td>
+                <td title={fmtKwh(s.ledger.heat!.heatPumpKwh)}>{fmtEur(v!.heatPump)}</td>
+                <td>{v!.saving >= 0 ? `−${fmtEur(v!.saving)}` : `+${fmtEur(-v!.saving)}`}</td>
+                <td>{v!.perDegreeDay !== null ? fmtEur(v!.perDegreeDay) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {yearly !== null && yearly.v!.saving > 0 && (
+        <p className="small tnum">
+          A year like the last 12 months saves {fmtEur(yearly.v!.saving)}: over 10 years {fmtEur(yearly.v!.saving * 10)}, what the heat pump, its
+          installation and closing the gas connection may cost, less the subsidy, to pay back in that time.
+        </p>
+      )}
+      <p className="muted small tnum">
+        Assumed: {a.kWhPerM3} kWh of heat per m³ of gas; an air-to-water heat pump at {copLine(a.cop)}, hot water at COP {a.hotWaterCop}
+        {a.hotWaterM3PerDay !== null ? `; where the boiler's states do not split the gas, ${fmtM3(a.hotWaterM3PerDay)} a day of hot water (last summer's daily gas)` : ""}.
+        The heat pumps already in the house stay as they are. energy.json's heatPump changes these.
+      </p>
     </Band>
   );
 }
