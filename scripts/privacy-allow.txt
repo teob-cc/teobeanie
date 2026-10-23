@@ -3,3 +3,16 @@
 #   object:<id>  # reason           an extra generic placeholder object id (never a real house's name)
 test/privacy.test.ts  # synthetic chat ids, tokens, addresses and entity ids that exercise the scan itself
 object:relays  # the placeholder package_export writes for a package's "relays" role (<domain>.<role>), checked in test/develop-tools.test.ts
+object:import_t1  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:import_t2  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:export_t1  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:export_t2  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:price_now  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:solar_energy  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:heat_pump_heating_energy  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:heat_pump_cooling_energy  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:ventilation_energy  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:old_meter_energy  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:water_meter  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:water_meter_total  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:water_price  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)

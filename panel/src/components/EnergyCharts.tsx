@@ -230,9 +230,12 @@ export function PriceBars({ points, at, timeZone, unit = "kWh" }: { points: Pric
   });
   const label = (i: number, text: string) => {
     const p = points[i]!;
-    const cx = Math.min(w - 30, Math.max(left + 30, (x(p.start) + x(p.end)) / 2));
+    // A label near an edge is anchored to it, so it is never cut off.
+    const mid = (x(p.start) + x(p.end)) / 2;
+    const anchor = mid > left + (w - left) * 0.8 ? "end" : mid < left + (w - left) * 0.2 ? "start" : "middle";
+    const cx = anchor === "end" ? Math.min(w - 2, x(p.end)) : anchor === "start" ? Math.max(left + 2, x(p.start)) : mid;
     return (
-      <text x={cx} y={Math.min(scale.y(p.price), scale.y(0)) - 5} textAnchor="middle" className="echart-val">
+      <text x={cx} y={Math.min(scale.y(p.price), scale.y(0)) - 5} textAnchor={anchor} className="echart-val">
         {text} {fmtPrice(p.price, unit).replace(`/${unit}`, "")} · {clock(p.start, timeZone)}
       </text>
     );

@@ -550,7 +550,15 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       let unattributedDays = 0;
       const seen = new Set<string>();
       const recent = [...closed.values()].filter((e) => e.ledger.from >= since).sort((a, b) => b.ledger.from - a.ledger.from);
+      // Several counters that went back in the same hour (an integration added again) as one line.
+      const resets = new Map<number, DataFlag[]>();
+      for (const f of [...t.flags, ...recent.flatMap((e) => e.flags)]) if (f.kind === "reset" && f.at !== undefined) resets.set(f.at, [...(resets.get(f.at) ?? []), f]);
       for (const f of [...t.flags, ...recent.flatMap((e) => e.flags)]) {
+        const together = f.kind === "reset" && f.at !== undefined ? resets.get(f.at)! : [];
+        if (together.length > 2) {
+          if (together[0] === f) flags.push({ kind: "reset", at: f.at!, text: `${together.length} counters went back in the same hour (an integration added again?): ${together.map((x) => x.id).join(", ")}; that hour counts 0 for each` });
+          continue;
+        }
         if (f.kind === "estimated_price" && f.id === undefined) estimatedDays++;
         else if (f.kind === "unattributed") unattributedDays++;
         else if (!seen.has(`${f.kind}|${f.id ?? ""}`)) {
