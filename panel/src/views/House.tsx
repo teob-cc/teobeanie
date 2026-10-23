@@ -8,8 +8,7 @@ import { PackageCards } from "../components/PackageCard";
 import { StatTile } from "../components/Tile";
 import { fmtBytes, fmtNum, rel } from "../format";
 import { since, stateText } from "../houseFormat";
-import { useEnergyToday, useHouse, useNow } from "../useHouse";
-import type { SseFrame } from "../useSse";
+import { useEnergyToday, useNow, type HouseData } from "../useHouse";
 
 const HEALTH_POLL_MS = 10_000;
 const OPEN_KEY = "teobeanie-house-open";
@@ -40,16 +39,17 @@ function useSectionOpen(): [Record<string, boolean>, (id: string, open: boolean)
 }
 
 export function House({
-  subscribe,
+  house,
   connected,
   onDecisions,
 }: {
-  subscribe: (fn: (f: SseFrame) => void) => () => void;
+  /** useHouse's view, held by the app so the Energy tab reads the same live states. */
+  house: HouseData;
   connected: boolean;
   /** Open the Decisions feed filtered to an instance (a card's link). */
   onDecisions: (key: string) => void;
 }) {
-  const { view, error, reload, lastFrameAt } = useHouse(subscribe, connected);
+  const { view, error, reload, lastFrameAt } = house;
   const now = useNow(1000);
   const hasEnergy = view?.sections.some((s) => s.id === "energy") ?? false;
   const energyToday = useEnergyToday(hasEnergy);

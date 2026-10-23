@@ -1,24 +1,42 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { api, CONTROL_CATEGORY, type PauseState, type ReloadOutcome } from "./api";
 import { PauseControl } from "./components/PauseControl";
 import type { HeuristicInstance } from "./decisions";
 import { useSse, type SseFrame } from "./useSse";
+import { useHouse } from "./useHouse";
+import type { VerticalProps } from "./verticals";
 import { Today } from "./views/Today";
 import { House } from "./views/House";
 import { Decisions } from "./views/Decisions";
 import { Heuristics } from "./views/Heuristics";
 import { Connect } from "./views/Connect";
+import { Energy } from "./views/Energy";
 
 // The editor is megabytes: loaded the first time the Studio's Editor tab opens.
 const Studio = lazy(() => import("./views/Studio"));
 
-type Tab = "house" | "studio" | "connect";
+/**
+ * The verticals: tabs between House and the Studio, each shown once its view says it
+ * has something to show. A new one is one entry here (and its view, on VerticalProps).
+ */
+const VERTICALS = [{ id: "energy", label: "Energy", View: Energy }] as const satisfies ReadonlyArray<{
+  id: string;
+  label: string;
+  View: ComponentType<VerticalProps>;
+}>;
+type VerticalId = (typeof VERTICALS)[number]["id"];
 
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "house", label: "House" },
-  { id: "studio", label: "Studio" },
-  { id: "connect", label: "Connect" },
-];
+type Tab = "house" | VerticalId | "studio" | "connect";
+
+/** The tab bar: House, the verticals that have something to show, the Studio, Connect. */
+function tabsFor(available: Partial<Record<VerticalId, boolean>>): Array<{ id: Tab; label: string }> {
+  return [
+    { id: "house", label: "House" },
+    ...VERTICALS.filter((v) => available[v.id] === true).map((v) => ({ id: v.id, label: v.label })),
+    { id: "studio", label: "Studio" },
+    { id: "connect", label: "Connect" },
+  ];
+}
 
 /** The Studio's own tabs: how Teobeanie decides, what it runs, what it called, and its code. */
 type StudioTab = "decisions" | "heuristics" | "calls" | "editor";
@@ -123,6 +141,22 @@ export default function App() {
       listeners.current.delete(fn);
     };
   }, []);
+  // The House view's live states, shared by the House tab and the verticals (Energy's power flow).
+  const house = useHouse(subscribe, connected);
+
+  // Which verticals have something to show; a hidden one's tab falls back to House.
+  const [available, setAvailable] = useState<Partial<Record<VerticalId, boolean>>>({});
+  const onAvailable = useMemo(
+    () =>
+      Object.fromEntries(
+        VERTICALS.map((v) => [v.id, (yes: boolean) => setAvailable((a) => (a[v.id] === yes ? a : { ...a, [v.id]: yes }))]),
+      ) as Record<VerticalId, (yes: boolean) => void>,
+    [],
+  );
+  const tabs = useMemo(() => tabsFor(available), [available]);
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tab)) setTab("house");
+  }, [tabs, tab]);
 
   const cycleTheme = () => {
     const next: Theme = theme === "auto" ? "dark" : theme === "dark" ? "light" : "auto";
@@ -150,7 +184,7 @@ export default function App() {
         />
         <h1>Teobeanie</h1>
         <nav className="tabs" role="tablist" aria-label="views">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               role="tab"
@@ -175,8 +209,13 @@ export default function App() {
       <main>
         {/* Views stay mounted so live feeds keep accumulating while hidden. */}
         <div style={tab === "house" ? undefined : { display: "none" }}>
-          <House subscribe={subscribe} connected={connected} onDecisions={openDecisions} />
+          <House house={house} connected={connected} onDecisions={openDecisions} />
         </div>
+        {VERTICALS.map(({ id, View }) => (
+          <div key={id} style={tab === id ? undefined : { display: "none" }}>
+            <View subscribe={subscribe} connected={connected} visible={tab === id} house={house.view} onAvailable={onAvailable[id]} />
+          </div>
+        ))}
         <div style={tab === "studio" ? undefined : { display: "none" }}>
           <nav className="subtabs" role="tablist" aria-label="studio">
             {STUDIO_TABS.map((t) => (

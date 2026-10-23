@@ -6,6 +6,13 @@ import type { SseFrame } from "./useSse";
 const RELAYOUT_MS = 10 * 60_000; // areas and devices change rarely: re-read the layout now and then
 const ENERGY_MS = 5 * 60_000;
 
+export interface HouseData {
+  view: HouseView | null;
+  error: string | null;
+  reload: () => void;
+  lastFrameAt: number | null;
+}
+
 /**
  * The House view: GET api/house once (and on every SSE reconnect, which reconciles
  * anything missed, and after a config reload), then "house" frames patch the entities'
@@ -14,7 +21,7 @@ const ENERGY_MS = 5 * 60_000;
 export function useHouse(
   subscribe: (fn: (f: SseFrame) => void) => () => void,
   connected: boolean,
-): { view: HouseView | null; error: string | null; reload: () => void; lastFrameAt: number | null } {
+): HouseData {
   const [view, setView] = useState<HouseView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null);
