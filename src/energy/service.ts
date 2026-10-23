@@ -65,7 +65,7 @@ const SHOWER_CATEGORY = "shower-summary";
 
 const emptyStats = (): HourlyStats => ({ change: new Map(), mean: new Map() });
 /** How the ledger closes a day: a change here closes every day again. */
-const LEDGER_VERSION = 2;
+const LEDGER_VERSION = 3;
 /** What a closed day depends on besides the statistics: the ledger's version, the sources and energy.json. */
 const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ v: LEDGER_VERSION, s, file })).digest("hex").slice(0, 16);
 const entityOf = (p: PriceSpec): string | undefined => ("entity" in p ? p.entity : undefined);
@@ -380,14 +380,17 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       }
     }
     const adder = await gasAdder(s).catch(() => undefined);
+    const oldest = s.attribution === undefined ? undefined : deps.signals?.query({ entityId: s.attribution.gas, order: "asc", limit: 1 })[0]?.at;
     const events: DayClosed[] = [];
     for (const d of days) {
       const dFrom = dayStart(d, zone());
       const dTo = dayStart(addDays(d, 1), zone());
-      // Closed again after the signals are gone: the split it was closed with.
+      // Closed again after the signals were purged (the whole day before their oldest row):
+      // the split it was closed with. A day the signals begin during is not split.
       const prev = closed.get(d)?.ledger.gas;
-      const kept = s.attribution !== undefined && prev?.hotWaterM3 !== undefined && prev.m3 > 0 ? { hotWater: prev.hotWaterM3 / prev.m3, heating: (prev.heatingM3 ?? 0) / prev.m3 } : undefined;
-      const shares = sharesOf(s, dFrom, dTo) ?? kept;
+      const purged = oldest !== undefined && dTo <= oldest;
+      const kept = purged && prev?.hotWaterM3 !== undefined && prev.m3 > 0 ? { hotWater: prev.hotWaterM3 / prev.m3, heating: (prev.heatingM3 ?? 0) / prev.m3 } : undefined;
+      const shares = purged ? kept : sharesOf(s, dFrom, dTo);
       const showers = showersOf(dFrom, dTo);
       const res = computeDay({
         key: d,

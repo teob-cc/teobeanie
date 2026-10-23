@@ -393,11 +393,12 @@ function service(opts: { history?: boolean; file?: unknown } = {}) {
   const record = vi.fn(async (events: EnergyEvent[]) => {
     for (const e of events) journal.append(ENERGY_CATEGORY, e.tag === "DayClosed" ? "ledger" : "prices", e);
   });
-  const make = () =>
+  const make = (signals?: unknown) =>
     createEnergyService({
       ha: ha as never,
       journal: journal as never,
       record,
+      ...(signals !== undefined ? { signals: signals as never } : {}),
       state: (id) => (id === "sensor.price_now" ? { state: "0.3", attributes: {} } : id === "sensor.gas_price" ? { state: "1.9", attributes: {} } : undefined),
       timeZone: () => TZ,
       file: parseEnergyFile(opts.file),
@@ -503,7 +504,8 @@ describe("createEnergyService", () => {
       fingerprint: "an-older-one",
     });
     const file = { attribution: { hotWater: "binary_sensor.boiler_hot_water" } };
-    const svc = make();
+    // The signals were purged up to today: the 22nd's boiler states are gone.
+    const svc = make({ query: () => [{ at: dayStart("2026-10-23", TZ), normalized: { value: 1, unit: null } }] });
     svc.configure(parseEnergyFile(file));
     svc.start();
     await svc.catchUp();
@@ -540,6 +542,8 @@ describe("createEnergyService", () => {
           .map((r) => ({ at: r.at, normalized: { value: r.value, unit: null } })),
     };
     const { ha, journal, record } = service();
+    // The 21st was closed before with the shares of its last hours: closed again, it is not split.
+    journal.append(ENERGY_CATEGORY, "ledger", { tag: "DayClosed", at: NOW, ledger: { key: "2026-10-21", gas: { m3: 2.4, cost: 0, hotWaterM3: 1.8, heatingM3: 0.6 } }, flags: [], fingerprint: "an-older-one" });
     const svc = createEnergyService({
       ha: ha as never,
       journal: journal as never,

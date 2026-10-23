@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — a wrong split is not kept
+
+- **A day closed again keeps its old gas split only when the signals were purged for the
+  whole day.** 0.5.1 kept a day's split whenever it could not be worked out again, so a
+  wrong split stayed (the day the signals began, closed with 0.5.1). Every day is closed
+  once more after this update.
+
 ## 0.5.2 — the gas split needs the whole day
 
 - **A day's gas is split between hot water and heating only when the signals cover the
