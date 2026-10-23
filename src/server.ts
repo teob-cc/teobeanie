@@ -12,6 +12,8 @@ import type { HaBridgeStats, HaClientStats } from "@lambda-house/teob-ts/ha";
 import type { FactInfo, InstanceInfo } from "./kernel/host.js";
 import type { DeviceResolver } from "./devices.js";
 import type { HouseService } from "./house/service.js";
+import type { EnergyService } from "./energy/service.js";
+import { mountEnergy } from "./energy/index.js";
 import { mountStudio, type StudioDeps } from "./studio/files.js";
 import { mountReload, type Reloader } from "./reload.js";
 import { mountPause, type PauseControl, type PauseState } from "./pause.js";
@@ -49,6 +51,8 @@ export interface ServerDeps {
   /** The facts with their values (GET api/facts); also in api/house. */
   facts?: () => FactInfo[];
   house: HouseService;
+  /** The energy ledger: api/energy, api/energy/periods, api/energy/hours. */
+  energy?: EnergyService;
   devices: DeviceResolver;
   studio: StudioDeps;
   /** Config reloads: POST api/reload, the panel's mode changes and instance edits, and the latest outcome with the instances. */
@@ -108,6 +112,8 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
       return c.json({ error: String(err) }, 502);
     }
   });
+
+  if (deps.energy !== undefined) mountEnergy(app, deps.energy);
 
   mountStudio(app, deps.studio);
   if (deps.reload !== undefined) {

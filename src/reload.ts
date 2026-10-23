@@ -1,6 +1,6 @@
 // reload.ts — config changes without an add-on restart. The working set is read again
 // when one of its files changes in the config folder (heuristics.json, allowlist.json,
-// tiles.json, the lock, anything under heuristics/ or packages/; 1 s after the last
+// tiles.json, energy.json, the lock, anything under heuristics/ or packages/; 1 s after the last
 // change) or on POST api/reload. The whole config is validated first and applied only when all of it is
 // valid: the scope, the routing, the House view and the heuristic instances, of
 // which only the added and changed ones start. An invalid config is rejected with
@@ -18,6 +18,8 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { loadAllowlist, type Allowlist } from "./allowlist.js";
 import { loadHouseConfig, type TileSpec } from "./tiles.js";
+import { loadEnergyFile } from "./energy/file.js";
+import type { EnergyFile } from "./energy/config.js";
 import type { GroupsConfig } from "./house/layout.js";
 import { loadInstances, type HeuristicHost, type InstanceConfig, type InstanceInfo, type PreparedReload, type ReloadChanges } from "./kernel/host.js";
 import { loadLibrary, type HeuristicSource, type PackageInfo } from "./packages/library.js";
@@ -30,7 +32,7 @@ import { LOCK_FILE } from "./packages/lock.js";
 import { inWorkingSet, type RevisionStore } from "./revisions.js";
 
 /** The config files the panel edits as text. */
-export const CONFIG_FILES = ["heuristics.json", "allowlist.json", "tiles.json"];
+export const CONFIG_FILES = ["heuristics.json", "allowlist.json", "tiles.json", "energy.json"];
 
 /** The top-level files whose digest says whether a reload changed a file (with heuristics/ and packages/). */
 const FINGERPRINT_FILES = [...CONFIG_FILES, LOCK_FILE];
@@ -42,6 +44,8 @@ export interface ConfigFiles {
   allowlist: Allowlist;
   tiles: TileSpec[];
   groups: GroupsConfig;
+  /** energy.json: the energy ledger's tariffs and additions (the defaults without one). */
+  energy: EnergyFile;
   /** The packages' heuristics and the house's own files'. */
   library: AnyHeuristic[];
   /** The packages they came from. */
@@ -61,12 +65,13 @@ export interface ConfigFiles {
 export async function readConfig(configDir: string, log: Log, extra: AnyHeuristic[] = []): Promise<ConfigFiles> {
   const allowlist = loadAllowlist(configDir, log);
   const { tiles, groups } = loadHouseConfig(configDir, log);
+  const energy = loadEnergyFile(configDir);
   const failures: string[] = [];
   const teobLog = (level: string, msg: string): void => log(level === "warn" ? "warning" : level, msg);
   const lib = await loadLibrary(configDir, teobLog, failures, { taken: extra });
   if (failures.length > 0) throw new Error(failures.join("; "));
   const instances = loadInstances(configDir, teobLog);
-  return { allowlist, tiles, groups, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
+  return { allowlist, tiles, groups, energy, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
 }
 
 /**

@@ -42,6 +42,11 @@ import { createAttributor, createOwnCalls, createUserDirectory } from "./attribu
 import { noderedTimeline } from "./projections.js";
 import { buildTiles, checkTileCoverage, loadHouseConfig } from "./tiles.js";
 import { createHouseService, type HouseConfig } from "./house/service.js";
+import { createEnergyService } from "./energy/service.js";
+import { createEnergyTools } from "./energy/index.js";
+import { loadEnergyFile } from "./energy/file.js";
+import { EMPTY_ENERGY_FILE, type EnergyFile } from "./energy/config.js";
+import { createEnergyJournal, energyAggregate, energyEventCodec, energyStateCodec } from "./energy/journal.js";
 import { applyConfig, createReloader, watchConfig } from "./reload.js";
 import { startAgentServer, startServer, type HealthReport } from "./server.js";
 import { installStarter, loadLibrary, starterPackages, type PackageInfo } from "./packages/library.js";
@@ -105,6 +110,14 @@ log(
   `house scope: ${allowlist.scope.observed.length} entities observed, ${allowlist.scope.operated.length} operable (policyVersion ${allowlist.policyVersion})`,
 );
 let { tiles, groups } = loadHouseConfig(config.configDir, log);
+// energy.json: the energy ledger's tariffs and additions. One that will not do is
+// reported and left out at the start (a reload rejects it, as any working-set file).
+let energyFile: EnergyFile = EMPTY_ENERGY_FILE;
+try {
+  energyFile = loadEnergyFile(config.configDir);
+} catch (err) {
+  log("error", `energy: ${String(err)} (the ledger runs without energy.json until it is fixed)`);
+}
 checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
 const scope = liveScope(() => allowlist.scope);
 
@@ -208,6 +221,7 @@ const { runtime, journal } = createSqliteRuntime({ path: journalPath, onPersiste
   registration(configAggregate, configEventCodec, configStateCodec),
   registration(accessAggregate, accessEventCodec, accessStateCodec),
   registration(moveAggregate, moveEventCodec, moveStateCodec),
+  registration(energyAggregate, energyEventCodec, energyStateCodec),
 ]);
 // The global pause, folded from the journal before any instance can act (a recovered
 // notice is resent through the actuator too).
@@ -419,6 +433,19 @@ const house = createHouseService({
   facts: () => heuristics.facts(),
   log: haLog,
 });
+// 9c. Energy ledger: today from HA's statistics, the past from the days it closed (journaled).
+const energy = createEnergyService({
+  ha,
+  journal,
+  record: createEnergyJournal(runtime),
+  signals: signalStore,
+  state: (id) => bridge.liveState(id),
+  timeZone: () => houseZone(houseFacts),
+  outdoorTemperature: () => allowlist.house.outdoor?.temperature,
+  file: energyFile,
+  log: haLog,
+});
+energy.start();
 cardsChanged = () => house.cardsChanged();
 factsChanged = () => house.factsChanged();
 
@@ -465,6 +492,7 @@ const reloader = createReloader({
         ({ tiles, groups } = next);
         checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
         house.configure(houseConfig());
+        energy.configure(next.energy);
         attributeWatched = new Set(prepared.attributeWatched);
         const nextRoutes = routesFor(allowlist, prepared.watchedEntities);
         if (JSON.stringify(nextRoutes) !== JSON.stringify(routes) || prev.policyVersion !== allowlist.policyVersion) {
@@ -531,6 +559,8 @@ const mcp = createMcp({
       cards: () => heuristics.cards(),
       caller: currentCaller,
     }),
+    // The energy ledger, read-only.
+    ...createEnergyTools({ energy, timeZone: () => houseZone(houseFacts) }),
     // All of HA, read-only and never recorded (ha_registry, ha_states, ha_history, ha_services, suggest).
     ...createHaTools({
       ha,
@@ -595,6 +625,7 @@ const server = startServer(
     heuristics: () => heuristics.instances(),
     facts: () => heuristics.facts(),
     house,
+    energy,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
     studio: {
       configDir: config.configDir,
@@ -649,6 +680,7 @@ const shutdown = (): void => {
     monitor?.stop();
     telegram?.stop();
     house.stop();
+    energy.stop();
     haRegistry.stop();
     bridge.stop();
     await ha.stop();

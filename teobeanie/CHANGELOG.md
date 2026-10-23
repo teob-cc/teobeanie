@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — the energy ledger and the Energy tab
+
+- **Energy ledger.** Teobeanie now keeps the house's euros and quantities per hour, day,
+  ISO week, month and year: grid import and export, solar, gas, water and each device
+  of Home Assistant's energy dashboard. Each hour is priced at its own price.
+  - Quantities come from Home Assistant's statistics.
+  - Today is computed as it goes, with a projection to the end of the day.
+  - Each past day is closed once, in the journal (`teob-energy`). At the first start
+    every day the statistics hold is closed, up to five years, in the background.
+  - A closed day keeps what Home Assistant forgets: the gas split between hot water and
+    heating (from the boiler's states while the signals still hold them) and the
+    showers `shower-summary` reported.
+  - A counter that goes back or jumps (a reset, an integration added again) counts 0
+    for that hour, and is flagged.
+  - Degree days put heating costs of mild and cold weeks side by side.
+- **Real past prices.** With `priceHistory` set and Home Assistant's EnergyZero
+  integration, hours without price statistics are priced from EnergyZero's all-in
+  hourly prices, through a service call that only returns data. Gas is the market price
+  plus the taxes and markup, derived from the days both are known; days priced this way
+  are marked estimated.
+- **energy.json** (optional, in the working set):
+  - tariffs over time: fixed charges, the energy tax credit, and the export price from
+    a date on, for when net metering ends;
+  - the price history;
+  - a water meter the energy dashboard does not list;
+  - the boiler states that split the gas;
+  - each device's use (heating, cooling, hot water, ventilation).
+  See [docs/energy.md](https://github.com/teob-cc/teobeanie/blob/main/docs/energy.md).
+- **The Energy tab**:
+  - today's euros so far and projected, by carrier and by use;
+  - bars of days, weeks, months and years against a year earlier, per degree day;
+  - today's and tomorrow's prices, with the cheapest and dearest hours;
+  - a day's hours;
+  - the showers;
+  - what is wrong with the data.
+  It reads only; it switches nothing.
+- **MCP `energy`** gives an agent the same ledger: today, periods, or a day's hours.
+
 ## 0.4.1 — move to another install
 
 - **Move to another install.** Home Assistant restores an add-on's backup only into the

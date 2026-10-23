@@ -10,7 +10,7 @@ that reads the same record to make judgements.
 
 Companion documents: [heuristics.md](heuristics.md) is the programming model in depth
 (rules, deciders, the journal grammar, modes, testing, replay), [house.md](house.md) the
-House view, [deploy.md](deploy.md) how a deploy works. Nothing in this repository names a
+House view, [energy.md](energy.md) the energy ledger, [deploy.md](deploy.md) how a deploy works. Nothing in this repository names a
 real house: entity ids, people, chats and routines live in each house's config folder.
 
 ## The shape
@@ -57,7 +57,7 @@ rest. Two folders matter:
 | Folder | Holds | In HA backups |
 |---|---|---|
 | `/data` | `journal.db`, `signals.db`, `views.db`, `options.json`, `agent-tokens.json` (names and salted hashes), `revisions/` (the working set's revisions) | yes, except `signals.db` |
-| `/config` (`addon_configs/<slug>`) | `heuristics.json`, `allowlist.json`, `tiles.json`, `teobeanie.lock.json`, `heuristics/`, `packages/` — the working set; `teobeanie-move/` the exports for moving to another install ([moving.md](moving.md)) | yes |
+| `/config` (`addon_configs/<slug>`) | `heuristics.json`, `allowlist.json`, `tiles.json`, `energy.json`, `teobeanie.lock.json`, `heuristics/`, `packages/` — the working set; `teobeanie-move/` the exports for moving to another install ([moving.md](moving.md)) | yes |
 
 Standalone (for development, or HA Container): `HA_WS_URL`, `HA_TOKEN`, `DATA_DIR`
 (default `.dev-data`), `CONFIG_DIR`; shadow mode is forced on.
@@ -144,7 +144,9 @@ instances? }` (section 6, item 3); `teob-access/agent-tokens` the agent tokens,
 hashes are in `/data/agent-tokens.json`, never in the journal); `teob-move/install` a
 move to another install, `InstallExported { at, by, folder, events, lastPosition, signals }`
 and `InstallImported { at, folder, version, createdAt, events, lastPosition }`
-([moving.md](moving.md)); `teob-fact/<id>` one
+([moving.md](moving.md)); `teob-energy/prices` and `teob-energy/ledger` the energy ledger's
+past prices and closed days, `PricesRecorded { at, kind, source, priceType, slots }` and
+`DayClosed { at, ledger, flags }` ([energy.md](energy.md)); `teob-fact/<id>` one
 stream per fact (correlation `fact/<id>`).
 
 What the host writes, per fact:
@@ -361,8 +363,8 @@ The surfaces, all behind ingress but MCP, which also has the agent port:
 
 | Surface | What it offers |
 |---|---|
-| **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it), Connect (mint, list and revoke agent tokens, with the line to paste); in the header, the global pause with who paused and when |
-| **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/connect` and `api/agent-tokens` (ingress only), `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
+| **Panel** | House (the whole scope, grouped and live, with the facts and their timelines), Energy (today's euros so far and projected, days, weeks, months and years, the price curve, the data's problems), Decisions (the feed with reasons and causation chains), Heuristics (instances, mode, last decision, agreement with other automations, reload), Studio (edit, test and save custom code), Calls (every `call_service` with who made it), Connect (mint, list and revoke agent tokens, with the line to paste); in the header, the global pause with who paused and when |
+| **Read API** | `health`, `api/heuristics`, `api/house`, `api/facts`, `api/house/energy-today`, `api/energy`, `api/energy/periods`, `api/energy/hours`, `api/journal`, `api/journal/chain/:id`, `api/signals/:entity`, `api/tiles`, `api/views/*`, `api/recorder/statistics`, `api/device-entities`, `api/studio/*`, `api/reload`, `api/pause`, `api/connect` and `api/agent-tokens` (ingress only), `api/stream` (SSE frames: `hello`, `journal`, `signal`, `house`, `reload`) |
 | **MCP** (`/mcp`) | tools of three kinds (below): read (the house scope's record, all of HA), develop (write the working set, in shadow) and operate (change what the house does). Every call journaled with its caller (`agent:<token name>` on the agent port, the HA user through ingress), a write with its revision; a desktop client connects to the agent port with a token (`claude mcp add --transport http …`), or, as a fallback, through HA's ingress session with the stdio bridge script, from the LAN or the tailnet |
 | **Telegram** | notices, command replies, the monitor's alerts and the daily summary; `/commands` |
 | **CLI** (`dist/studio/cli.js`) | `init` (a starter working set with the starter packages), `types` (generate the house typings) and `replay`; both read the folder's packages, and the starter ones it does not have yet |
