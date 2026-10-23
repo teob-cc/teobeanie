@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — a heat pump instead of gas
+## 0.6.0 — a heat pump instead of gas
 
 - **A heat pump instead of gas: the ledger answers whether it pays.**
   - Every day also prices an all-electric alternative: the boiler's heat made by a heat
