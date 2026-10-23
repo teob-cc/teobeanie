@@ -6,6 +6,7 @@
 
 import type { HeuristicInstance } from "./decisions";
 import type { EnergyToday, HouseView } from "../../src/house/view";
+import type { EnergyHours, EnergyOverview, EnergyPeriods } from "../../src/energy/types";
 import type { ParamField } from "../../src/kernel/params";
 
 export interface TimelineCard {
@@ -316,9 +317,19 @@ async function edit(url: string, method: string, body?: unknown): Promise<EditOu
 
 const instanceUrl = (key: string) => `api/instances/${key.split("/").map(encodeURIComponent).join("/")}`;
 
+/** A non-2xx answer; status 404 from a route an older add-on does not serve. */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
+  if (!res.ok) throw new HttpError(`GET ${url} → ${res.status}`, res.status);
   return (await res.json()) as T;
 }
 
@@ -348,6 +359,13 @@ export const api = {
   health: () => getJson<HealthReport>("health"),
   house: () => getJson<HouseView>("api/house"),
   energyToday: () => getJson<EnergyToday>("api/house/energy-today"),
+  /** The Energy tab (src/energy/types.ts): today, the last 7 days, the prices and the data's flags. */
+  energy: () => getJson<EnergyOverview>("api/energy"),
+  /** Days, weeks, months or years from one local date to another (inclusive), oldest first. */
+  energyPeriods: (period: EnergyPeriods["period"], from: string, to: string) =>
+    getJson<EnergyPeriods>(`api/energy/periods?${qs({ period, from, to })}`),
+  /** One local date's hours. */
+  energyHours: (date: string) => getJson<EnergyHours>(`api/energy/hours?${qs({ date })}`),
   heuristics: () => getJson<{ instances: HeuristicInstance[]; reload?: ReloadOutcome | null }>("api/heuristics"),
   /** Re-read heuristics.json, allowlist.json and tiles.json; a rejection is an outcome too. */
   reloadConfig: async (): Promise<ReloadOutcome> => {

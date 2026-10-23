@@ -1666,3 +1666,158 @@ pre {
   color: var(--muted);
   font-weight: 500;
 }
+
+/* ---- energy ---- */
+.eband {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 0.6rem 0;
+  min-width: 0;
+}
+.eband-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  padding: 0.6rem 0.8rem;
+}
+.eband-title {
+  font-size: inherit;
+  font-weight: 650;
+  margin: 0;
+}
+.eband-line {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+.eband-body {
+  border-top: 1px solid var(--grid);
+  padding: 0.7rem 0.8rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.estats {
+  margin: 0;
+}
+.emoney {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.7rem 1.4rem;
+}
+.eperiods,
+.eday-pick {
+  margin: 0;
+}
+.eday-pick input {
+  font: inherit;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.12rem 0.5rem;
+}
+.eday-pick .hsec-more {
+  margin-top: 0;
+}
+.eday-pick .hsec-more:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.echart {
+  width: 100%;
+  min-width: 0;
+}
+.echart svg {
+  display: block;
+}
+.echart-tick {
+  font-size: 10.5px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.echart-tick-sel {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.echart-val {
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.echart-slot {
+  cursor: pointer;
+  outline: none;
+}
+.echart-slot:focus-visible rect:first-of-type {
+  stroke: var(--series-1);
+  stroke-width: 1.5;
+}
+.echart-ghost {
+  fill: var(--muted);
+  opacity: 0.35;
+}
+.echart-ghost-swatch {
+  background: var(--muted);
+  opacity: 0.35;
+}
+.echart-hatch-swatch {
+  background: repeating-linear-gradient(45deg, var(--series-1) 0 2px, var(--surface) 2px 4px);
+}
+.eperiod-line {
+  margin-top: -0.2rem;
+}
+.etable-wrap {
+  overflow-x: auto;
+}
+.etable {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  min-width: 100%;
+}
+.etable th,
+.etable td {
+  text-align: right;
+  padding: 0.22rem 0.5rem;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+}
+.etable th:first-child,
+.etable td:first-child {
+  text-align: left;
+  padding-left: 0;
+}
+.etable th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.etable-est td {
+  color: var(--ink-2);
+  font-style: italic;
+}
+.eday-hours summary,
+.esources summary {
+  cursor: pointer;
+}
+.eday-hours .etable-wrap,
+.esources .kv {
+  margin-top: 0.4rem;
+}
+.eflags li {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .emoney {
+    grid-template-columns: 1fr;
+  }
+  .estats {
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  }
+  .etable th,
+  .etable td {
+    padding: 0.2rem 0.3rem;
+  }
+}
