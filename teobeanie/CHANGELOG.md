@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — a wrong split is not kept
+## 0.5.3 — a wrong split is not kept
 
 - **A day closed again keeps its old gas split only when the signals were purged for the
   whole day.** 0.5.1 kept a day's split whenever it could not be worked out again, so a
