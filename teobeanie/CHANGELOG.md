@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A press Home Assistant repeats is not a press.** An event entity's state is the time of
+  its last press, and Home Assistant restores it when the entity comes back from
+  unavailable (a Zigbee or Thread button that dropped off the network for a second); the
+  `button` package took that for a new press and moved a sun screen. A press older than a
+  minute is now declined, and the decline is journaled with its reason. `button` 1.1.0.
+- **`button-cover` shares its covers**, so a guard may close them too.
+- **New starter package `sun-screen`:** `screen-guard` closes a sun screen after sundown,
+  at once in a strong wind, and before rain, which it announces first as an alert and
+  closes on after a countdown. It only closes; a close that does not arrive is sent once
+  more, then alerted.
 - The Energy tab's heat pump band names its last column "Heat pump saves" and shows the saving as a plain amount (a loss as "costs … more").
 - The Energy tab's "by use" bars show every metered device that is not heating, cooling, hot water or ventilation (a washing machine, a dryer, a workstation) as a row of its own, by its name, instead of folding it into the rest of the electricity.
 

@@ -16,3 +16,5 @@ object:old_meter_energy  # a generic sample meter of the energy ledger's specs a
 object:water_meter  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
 object:water_meter_total  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
 object:water_price  # a generic sample meter of the energy ledger's specs and docs/energy.md (tariffs, devices, water)
+object:screen  # the sun-screen package's specs: the cover under test (cover.screen)
+object:terrace_screen  # the sun-screen package's README and example.json: the sample screen (cover.terrace_screen)

@@ -12,6 +12,7 @@ import garageDoor from "../packages/garage-door/garage-door.ts";
 import hold from "../packages/hold/hold.ts";
 import leakShutoff from "../packages/leak-guard/leak-shutoff.ts";
 import relayPulse from "../packages/relay-pulse/relay-pulse.ts";
+import screenGuard from "../packages/sun-screen/screen-guard.ts";
 import sensorLight from "../packages/sensor-light/sensor-light.ts";
 import trigger from "../packages/trigger/trigger.ts";
 import waterMeter from "../packages/water-meter/water-meter.ts";
@@ -29,4 +30,5 @@ export const STARTER: AnyHeuristic[] = [
   appliance,
   garageDoor,
   climateGuard,
+  screenGuard,
 ].flat();

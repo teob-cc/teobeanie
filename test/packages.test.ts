@@ -39,9 +39,9 @@ describe("the starter set", async () => {
   const starters = starterPackages();
   const lib = await loadLibrary(tmp(), noLog, undefined, { withStarter: true });
 
-  it("is the eleven packages, every one loading with its manifest", () => {
+  it("is the twelve packages, every one loading with its manifest", () => {
     expect(starters.map((s) => s.name)).toEqual([
-      "appliance", "button", "climate-guard", "door-watch", "garage-door", "hold", "leak-guard", "relay-pulse", "sensor-light", "trigger", "water-meter",
+      "appliance", "button", "climate-guard", "door-watch", "garage-door", "hold", "leak-guard", "relay-pulse", "sensor-light", "sun-screen", "trigger", "water-meter",
     ]);
     expect(lib.packages.map((p) => p.name)).toEqual(starters.map((s) => s.name));
     expect(lib.packages.every((p) => p.origin === "starter" && !p.modified && !p.installed)).toBe(true);
@@ -50,7 +50,7 @@ describe("the starter set", async () => {
   it("keeps every heuristic id existing houses use", () => {
     expect(lib.heuristics.map((d) => d.id).sort()).toEqual([
       "appliance-auto-off", "button", "button-cover", "climate-guard", "door-nag", "follow-with-run-on", "garage-door", "hold",
-      "leak-shutoff", "night-leak", "occupancy-light", "relay-pulse", "sensor-light", "shower-summary", "sustained-notice", "trigger",
+      "leak-shutoff", "night-leak", "occupancy-light", "relay-pulse", "screen-guard", "sensor-light", "shower-summary", "sustained-notice", "trigger",
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("the starter set", async () => {
     describe(s.name, () => {
       it("has a manifest on this platform, a README, specs and an example", () => {
         expect(manifestProblems(json(join(s.dir, "teobeanie.json")), s.name)).toEqual([]);
-        expect(s.manifest.version).toBe("1.0.0");
+        expect(s.manifest.version).toMatch(/^\d+\.\d+\.\d+$/);
         expect(satisfies(SDK_VERSION, s.manifest.platform)).toBe(true);
         for (const f of ["README.md", "example.json"]) expect(existsSync(join(s.dir, f)), f).toBe(true);
         expect(lib.packages.find((p) => p.name === s.name)!.files.some((f) => f.endsWith(".test.ts"))).toBe(true);

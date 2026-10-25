@@ -1,0 +1,12 @@
+{
+  "heuristic": "screen-guard",
+  "id": "terrace",
+  "mode": "shadow",
+  "alerts": true,
+  "params": {
+    "covers": ["cover.terrace_screen"],
+    "sunBelow": 0,
+    "windAbove": 25,
+    "rain": { "closeAfterMin": 10 }
+  }
+}

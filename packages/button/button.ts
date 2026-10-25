@@ -4,9 +4,29 @@
 // delivered through Home Assistant's MQTT trigger, so a remote without any HA entity
 // works too. Each press sets entities to values, the way a rule's .to() does.
 //
-// button-cover (wall buttons moving the blinds to fixed positions) is this pattern.
+// An event entity's state is the time of its last press, and Home Assistant repeats
+// it: at boot, on a resync, and when the entity comes back from unavailable (a Zigbee
+// or Thread button that dropped off the network for a second). Only a fresh press
+// counts: a change Home Assistant reported live, whose time is within a minute of now.
+//
+// button-cover (wall buttons moving the blinds to fixed positions) is this pattern. It
+// shares its covers, so a guard (sun-screen's screen-guard) may close them too.
 
 import { actionsFor, defineHeuristic, param, type Action, type DecideCtx, type Desired, type Infer } from "teobeanie";
+
+/** A press older than this is one Home Assistant repeated, not a new one. */
+export const STALE_PRESS_MS = 60_000;
+
+/**
+ * Why a change of an event entity is not a new press: its time (the entity's state)
+ * is further back than STALE_PRESS_MS. Undefined when it is a press, or has no time.
+ */
+export function stalePress(value: unknown, now: number): string | undefined {
+  const at = typeof value === "string" ? Date.parse(value) : NaN;
+  if (!Number.isFinite(at) || now - at <= STALE_PRESS_MS) return undefined;
+  const min = Math.round((now - at) / 60_000);
+  return `a press from ${min < 120 ? `${min} min` : `${Math.round(min / 60)} h`} ago reported again (the button back from unavailable?), not a new press`;
+}
 
 const BUTTON_PARAMS = param.object({
   events: param.entities("event").optional().doc("event.* entities whose presses count."),
@@ -47,7 +67,7 @@ export const button = defineHeuristic<ButtonParams, Record<string, never>, Event
   title: "Button",
   description: "A press on a remote or wall button (event entity or MQTT action) sets entities to values.",
   guarantees:
-    "Each press sets the entities it names, the way a person pressing the button would expect; nothing happens between presses.",
+    "Each press sets the entities it names, the way a person pressing the button would expect; nothing happens between presses, and a press Home Assistant repeats (the button back from unavailable) is not a press.",
   params: BUTTON_PARAMS,
   watch: (p) => p.events ?? [],
   actuates: (p) => targets(p).filter((e) => !(p.uses ?? []).includes(e)),
@@ -58,8 +78,11 @@ export const button = defineHeuristic<ButtonParams, Record<string, never>, Event
   decide(_state, input, ctx) {
     if (input.kind === "signal") {
       // An event entity's state is the last press time: only a live change is a press.
-      // Boot baselines and reconnect resyncs are not.
+      // Boot baselines and reconnect resyncs are not, nor is the last press repeated
+      // when the entity comes back from unavailable.
       if (input.origin !== "ha" || input.value === null || input.state === "unavailable" || input.state === "unknown") return undefined;
+      const stale = stalePress(input.value, ctx.now);
+      if (stale !== undefined) return { why: `${input.entity}: ${stale}` };
       const type = ctx.get(input.entity)?.attributes["event_type"];
       return press(ctx, input.entity, typeof type === "string" ? type : null);
     }
@@ -104,12 +127,14 @@ export const buttonCover = defineHeuristic<ButtonCoverParams, Record<string, nev
   ...(button as unknown as ReturnType<typeof defineHeuristic<ButtonCoverParams, Record<string, never>, Event>>),
   id: "button-cover",
   title: "Button → cover position",
-  description: "A button press moves covers to a fixed position.",
+  description: "A button press moves covers to a fixed position. The covers are shared: a guard may close them too.",
   guarantees:
-    "Each press moves the covers to that button's position; nothing happens between presses.",
+    "Each press moves the covers to that button's position; nothing happens between presses, and a press Home Assistant repeats (the button back from unavailable) is not a press.",
   params: BUTTON_COVER_PARAMS,
   watch: (p) => button.watch(fromButtonCover(p)),
   actuates: (p) => p.covers,
+  // A guard (sun-screen's screen-guard) closes the same covers: it operates them through uses.
+  shares: (p) => p.covers,
   uses: () => [],
   triggers: () => ({}),
   decide: (state, input, ctx) => button.decide(state, input, { ...ctx, params: fromButtonCover(ctx.params) }),

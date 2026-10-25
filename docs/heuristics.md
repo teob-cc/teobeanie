@@ -25,7 +25,7 @@ The add-on copies them into the config folder's `packages/` (see
 | **button** | A press sets entities: from an `event.*` entity (by `event_type`) or an MQTT action, so a zigbee2mqtt remote works without any HA entity. | button: `button`, preset `button-cover` |
 | **command** | A named command checks the house, acts, and confirms what happened. | garage-door: `garage-door` |
 | **notice** | Tell people: reminders while a door is open, someone lingering, water running at night, a shower's cost. | door-watch: `door-nag`, `sustained-notice`; water-meter: `night-leak`, `shower-summary` |
-| **guard** | Protect the house; never undone automatically. | leak-guard: `leak-shutoff` |
+| **guard** | Protect the house; never undone automatically. | leak-guard: `leak-shutoff`; sun-screen: `screen-guard` |
 
 Patterns compose by **sharing**, never by two owners. An instance may `share` an entity
 it owns, and another instance that declares it in `uses` may operate it too:

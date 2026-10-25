@@ -1,7 +1,7 @@
 // button and button-cover: a press sets entities.
 
 import { describe, expect, it, simulate } from "teobeanie/test";
-import { button, buttonCover, type ButtonParams } from "./button.ts";
+import { button, buttonCover, stalePress, type ButtonParams } from "./button.ts";
 
 describe("button", () => {
   const remote: ButtonParams = {
@@ -40,5 +40,24 @@ describe("button-cover", () => {
     sim.set("event.btn_1", "2026-10-12T10:00:00.000+00:00");
     expect(sim.calls()).toEqual(["cover.set_cover_position cover.a", "cover.set_cover_position cover.b"]);
     expect(sim.actions()[0]!.action).toMatchObject({ data: { position: 0 } });
+  });
+
+  it("an old press repeated, the button back from unavailable, is not a press; a fresh one is", () => {
+    const old = "2026-01-05T06:00:00.000+00:00"; // six hours before the simulator's noon
+    const sim = simulate(buttonCover, p, { "event.btn_2": { state: old, attributes: { event_type: "multi_press_1" } } });
+    sim.set("event.btn_2", "unavailable").set("event.btn_2", old, { event_type: "multi_press_1" });
+    expect(sim.calls()).toEqual([]);
+    expect(sim.whys()).toEqual(["event.btn_2: a press from 6 h ago reported again (the button back from unavailable?), not a new press"]);
+    sim.set("event.btn_2", new Date(sim.now).toISOString(), { event_type: "multi_press_1" });
+    expect(sim.calls()).toEqual(["cover.set_cover_position cover.a", "cover.set_cover_position cover.b"]);
+    expect(sim.actions()[0]!.action).toMatchObject({ data: { position: 100 } });
+    expect(stalePress("2026-01-05T11:59:00.000+00:00", sim.now)).toBeUndefined(); // within a minute: a press
+    expect(stalePress("2026-01-05T11:58:59.000+00:00", sim.now)).toContain("a press from 1 min ago");
+    expect(stalePress("not a time", sim.now)).toBeUndefined();
+  });
+
+  it("shares its covers, so a guard may close them too", () => {
+    expect(buttonCover.shares!(p)).toEqual(["cover.a", "cover.b"]);
+    expect(buttonCover.actuates(p)).toEqual(["cover.a", "cover.b"]);
   });
 });
