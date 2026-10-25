@@ -100,8 +100,9 @@ export function byCarrier(l: Ledger): MoneyRow[] {
 
 /**
  * The same total by what it was used for. Gas is divided by the attributed m³ (heating,
- * hot water, the rest); without attribution it stays one row. Devices count by their use;
- * the rest of the electricity is the net electricity less the devices. Water and the fixed
+ * hot water, the rest); without attribution it stays one row. Devices count by their use, and
+ * a metered device of no such use (a washing machine, a workstation) is a row of its own; the
+ * rest of the electricity is the net electricity less the devices. Water and the fixed
  * charges close it, so the rows add up to the total. Empty rows are left out.
  */
 export function byUse(l: Ledger): MoneyRow[] {
@@ -128,10 +129,12 @@ export function byUse(l: Ledger): MoneyRow[] {
   rows.push({ key: "heat_pumps", label: "Heat pumps", value: sum(pumps), tone: TONE.electricity, detail: names(pumps) });
   rows.push({ key: "hot_water_el", label: "Hot water (electric)", value: sum(hotDevices), tone: TONE.electricity, detail: names(hotDevices) });
   rows.push({ key: "ventilation", label: "Ventilation", value: sum(vent), tone: TONE.electricity, detail: names(vent) });
+  const others = devices(["other"]).sort((a, b) => b.cost - a.cost);
+  for (const d of others) rows.push({ key: `device:${d.id}`, label: d.name, value: d.cost, tone: TONE.electricity, detail: fmtKwh(d.kWh) });
   rows.push({
     key: "rest",
     label: "Rest of the electricity",
-    value: netElectricity(l) - sum(pumps) - sum(hotDevices) - sum(vent),
+    value: netElectricity(l) - sum(pumps) - sum(hotDevices) - sum(vent) - sum(others),
     tone: TONE.electricity,
     detail: "everything else, less the export credit",
   });

@@ -114,8 +114,10 @@ describe("the money split", () => {
     expect(rows["other_gas"]).toBeCloseTo(0.75);
     expect(rows["heat_pumps"]).toBeCloseTo(0.9);
     expect(rows["ventilation"]).toBeCloseTo(0.15);
-    // The "other" device stays in the rest: net 2 − 0.9 − 0.15.
-    expect(rows["rest"]).toBeCloseTo(0.95);
+    // A device of no named use is its own row, out of the rest: net 2 − 0.9 − 0.15 − 0.3.
+    expect(rows["device:sensor.washer"]).toBeCloseTo(0.3);
+    expect(byUse(l).find((r) => r.key === "device:sensor.washer")?.label).toBe("Washer");
+    expect(rows["rest"]).toBeCloseTo(0.65);
     expect(rows["hot_water_el"]).toBeUndefined(); // no such device: no empty row
     expect(sum(byUse(l))).toBeCloseTo(l.total);
   });

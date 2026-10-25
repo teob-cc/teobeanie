@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The Energy tab's heat pump band names its last column "Heat pump saves" and shows the saving as a plain amount (a loss as "costs … more").
+- The Energy tab's "by use" bars show every metered device that is not heating, cooling, hot water or ventilation (a washing machine, a dryer, a workstation) as a row of its own, by its name, instead of folding it into the rest of the electricity.
 
 ## 0.6.0 — a heat pump instead of gas
 
