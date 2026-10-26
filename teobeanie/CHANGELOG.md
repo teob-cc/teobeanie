@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — the Infra tab
+## 0.7.0 — the Infra tab
 
 - **New panel tab: Infra.** The house's infrastructure as Home Assistant sees it now, with
   nothing typed in: what needs a look (alerts on top), the internet link (a UPnP gateway's
