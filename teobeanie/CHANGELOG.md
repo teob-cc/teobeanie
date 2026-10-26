@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — the Infra tab
+
+- **New panel tab: Infra.** The house's infrastructure as Home Assistant sees it now, with
+  nothing typed in: what needs a look (alerts on top), the internet link (a UPnP gateway's
+  WAN, external address, traffic and uptime), the Wi-Fi mesh (TP-Link Deco nodes: up,
+  load, clients, backhaul, firmware), the devices on the network, the tailnet (Tailscale
+  machines), and Home Assistant's own health (updates waiting, devices it cannot reach,
+  bridges and meter links). The devices are extracted, not listed by hand: every device
+  Home Assistant integrates that has a network address (named by its own integration,
+  online from its own entities, with the router's node, band and address when the router
+  sees it), every Ping host, and the router's other clients while they are online. A known
+  device or Ping host offline for 10 minutes is an alert; a client that leaves is not.
+  `GET api/infra` serves it; [docs/infra.md](../docs/infra.md) says where each part comes from.
+- **Cards can move to the Infra tab.** `tiles.json` takes `"infra": { "cards": [...] }`:
+  instance keys, heuristic ids or globs (`"health-watch/*"`). Those cards show on the Infra
+  tab, their bad and warn fields among its alerts, and leave the House page.
+
 ## 0.6.1 — what the daily summary says
 
 - **The daily summary tells what matters in the house.** Instead of each instance's

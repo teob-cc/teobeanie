@@ -55,7 +55,9 @@ buttons, and a link to its decisions in the Studio. A button runs the instance's
 command as the HA user of the panel session (`POST api/command`, through ingress
 only), journaled like a Telegram command; a button with a confirm text asks first.
 The instance's reply goes where its replies always go (the chat). How a heuristic
-declares its card: [heuristics.md, Cards](heuristics.md#cards).
+declares its card: [heuristics.md, Cards](heuristics.md#cards). The cards `tiles.json`
+puts on the Infra tab (`"infra": { "cards": [...] }`) show there instead:
+[infra.md](infra.md).
 
 ## Facts
 

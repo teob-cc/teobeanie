@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { loadAllowlist, type Allowlist } from "./allowlist.js";
 import { loadHouseConfig, type TileSpec } from "./tiles.js";
+import type { InfraConfig } from "./infra/service.js";
 import { loadEnergyFile } from "./energy/file.js";
 import type { EnergyFile } from "./energy/config.js";
 import type { GroupsConfig } from "./house/layout.js";
@@ -44,6 +45,8 @@ export interface ConfigFiles {
   allowlist: Allowlist;
   tiles: TileSpec[];
   groups: GroupsConfig;
+  /** tiles.json "infra": the cards on the Infra tab. */
+  infra: InfraConfig;
   /** energy.json: the energy ledger's tariffs and additions (the defaults without one). */
   energy: EnergyFile;
   /** The packages' heuristics and the house's own files'. */
@@ -64,14 +67,14 @@ export interface ConfigFiles {
  */
 export async function readConfig(configDir: string, log: Log, extra: AnyHeuristic[] = []): Promise<ConfigFiles> {
   const allowlist = loadAllowlist(configDir, log);
-  const { tiles, groups } = loadHouseConfig(configDir, log);
+  const { tiles, groups, infra } = loadHouseConfig(configDir, log);
   const energy = loadEnergyFile(configDir);
   const failures: string[] = [];
   const teobLog = (level: string, msg: string): void => log(level === "warn" ? "warning" : level, msg);
   const lib = await loadLibrary(configDir, teobLog, failures, { taken: extra });
   if (failures.length > 0) throw new Error(failures.join("; "));
   const instances = loadInstances(configDir, teobLog);
-  return { allowlist, tiles, groups, energy, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
+  return { allowlist, tiles, groups, infra, energy, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
 }
 
 /**

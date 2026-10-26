@@ -13,6 +13,7 @@ import type { FactInfo, InstanceInfo } from "./kernel/host.js";
 import type { DeviceResolver } from "./devices.js";
 import type { HouseService } from "./house/service.js";
 import type { EnergyService } from "./energy/service.js";
+import type { InfraService } from "./infra/service.js";
 import { mountEnergy } from "./energy/index.js";
 import { mountStudio, type StudioDeps } from "./studio/files.js";
 import { mountReload, type Reloader } from "./reload.js";
@@ -53,6 +54,8 @@ export interface ServerDeps {
   house: HouseService;
   /** The energy ledger: api/energy, api/energy/periods, api/energy/hours. */
   energy?: EnergyService;
+  /** The Infra tab: GET api/infra. */
+  infra?: InfraService;
   devices: DeviceResolver;
   studio: StudioDeps;
   /** Config reloads: POST api/reload, the panel's mode changes and instance edits, and the latest outcome with the instances. */
@@ -114,6 +117,10 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
   });
 
   if (deps.energy !== undefined) mountEnergy(app, deps.energy);
+  if (deps.infra !== undefined) {
+    const infra = deps.infra;
+    app.get("/api/infra", async (c) => c.json(await infra.view()));
+  }
 
   mountStudio(app, deps.studio);
   if (deps.reload !== undefined) {

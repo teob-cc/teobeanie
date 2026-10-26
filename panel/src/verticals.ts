@@ -14,4 +14,6 @@ export interface VerticalProps {
   house: HouseView | null;
   /** Whether its tab shows; called when that changes. */
   onAvailable: (available: boolean) => void;
+  /** Open the Decisions feed filtered to an instance (a card's link). */
+  onDecisions: (key: string) => void;
 }

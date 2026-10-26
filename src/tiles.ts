@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeState, type HaBridge } from "@lambda-house/teob-ts/ha";
 import { parseGroups, type GroupsConfig } from "./house/layout.js";
+import { parseInfraConfig, type InfraConfig } from "./infra/service.js";
 import { compassPoint } from "./house/summary.js";
 
 export type TileKind = "power" | "temp" | "co2" | "humidity" | "wind" | "binary" | "presence" | "text";
@@ -41,24 +42,26 @@ export function loadTiles(configDir: string, log: (l: string, m: string) => void
 }
 
 /**
- * CONFIG_DIR/tiles.json: the pinned "tiles" and the House view's "groups" overrides
- * (see house/layout.ts). Either may be left out; without the file, no tiles.
+ * CONFIG_DIR/tiles.json: the pinned "tiles", the House view's "groups" overrides (see
+ * house/layout.ts) and "infra" (the cards on the Infra tab, infra/service.ts). Any may be
+ * left out; without the file, no tiles.
  */
-export function loadHouseConfig(configDir: string, log: (l: string, m: string) => void): { tiles: TileSpec[]; groups: GroupsConfig } {
+export function loadHouseConfig(configDir: string, log: (l: string, m: string) => void): { tiles: TileSpec[]; groups: GroupsConfig; infra: InfraConfig } {
   const path = join(configDir, "tiles.json");
   if (!existsSync(path)) {
     log("info", `no ${path} — House view shows no pinned tiles and the generic layout`);
-    return { tiles: [], groups: {} };
+    return { tiles: [], groups: {}, infra: { cards: [] } };
   }
-  let parsed: { tiles?: unknown; groups?: unknown };
+  let parsed: { tiles?: unknown; groups?: unknown; infra?: unknown };
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8")) as { tiles?: unknown; groups?: unknown };
+    parsed = JSON.parse(readFileSync(path, "utf8")) as { tiles?: unknown; groups?: unknown; infra?: unknown };
   } catch (err) {
     throw new Error(`${path}: unparseable JSON: ${(err as Error).message}`);
   }
-  if (parsed.tiles === undefined && parsed.groups !== undefined) return { tiles: [], groups: parseGroups(parsed.groups, `${path}: groups`) };
+  const infra = parseInfraConfig(parsed.infra, `${path}: infra`);
+  if (parsed.tiles === undefined && (parsed.groups !== undefined || parsed.infra !== undefined)) return { tiles: [], groups: parseGroups(parsed.groups, `${path}: groups`), infra };
   if (!Array.isArray(parsed.tiles)) throw new Error(`${path}: missing "tiles" array`);
-  return { tiles: parseTiles(parsed.tiles, path), groups: parseGroups(parsed.groups, `${path}: groups`) };
+  return { tiles: parseTiles(parsed.tiles, path), groups: parseGroups(parsed.groups, `${path}: groups`), infra };
 }
 
 function parseTiles(tiles: unknown[], path: string): TileSpec[] {

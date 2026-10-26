@@ -7,6 +7,7 @@
 import type { HeuristicInstance } from "./decisions";
 import type { EnergyToday, HouseView } from "../../src/house/view";
 import type { EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons } from "../../src/energy/types";
+import type { InfraView } from "../../src/infra/view";
 import type { ParamField } from "../../src/kernel/params";
 
 export interface TimelineCard {
@@ -361,6 +362,8 @@ export const api = {
   energyToday: () => getJson<EnergyToday>("api/house/energy-today"),
   /** The Energy tab (src/energy/types.ts): today, the last 7 days, the prices and the data's flags. */
   energy: () => getJson<EnergyOverview>("api/energy"),
+  /** The Infra tab: the internet link, the mesh, the network's devices, the tailnet, HA's health. */
+  infra: () => getJson<InfraView>("api/infra"),
   /** Days, weeks, months or years from one local date to another (inclusive), oldest first. */
   energyPeriods: (period: EnergyPeriods["period"], from: string, to: string) =>
     getJson<EnergyPeriods>(`api/energy/periods?${qs({ period, from, to })}`),

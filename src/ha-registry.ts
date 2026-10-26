@@ -17,6 +17,12 @@ export interface RegDevice {
   manufacturer?: string;
   model?: string;
   areaId?: string;
+  /** Its network addresses (lower case, colon separated): how a router's tracker finds it. */
+  macs: string[];
+  /** The hub it hangs off (a Zigbee bridge, a gateway). */
+  viaDeviceId?: string;
+  /** A service, not a thing (an integration's own entry: HACS, an add-on). */
+  service: boolean;
 }
 
 export interface RegEntity {
@@ -30,6 +36,10 @@ export interface RegEntity {
   hidden: boolean;
   /** "config" or "diagnostic". */
   category?: string;
+  /** The integration's own id for it (a MAC plus a key for a router's sensors). */
+  uniqueId?: string;
+  /** What the integration calls it, the same in every language ("wan_status"). */
+  translationKey?: string;
 }
 
 export interface HaRegistry {
@@ -64,6 +74,8 @@ interface RawEntity {
   disabled_by?: string | null;
   hidden_by?: string | null;
   entity_category?: string | null;
+  unique_id?: string | null;
+  translation_key?: string | null;
 }
 interface RawDevice {
   id: string;
@@ -72,11 +84,19 @@ interface RawDevice {
   manufacturer?: string | null;
   model?: string | null;
   area_id?: string | null;
+  connections?: Array<[string, string]> | null;
+  via_device_id?: string | null;
+  entry_type?: string | null;
 }
 interface RawArea {
   area_id: string;
   name: string;
   floor_id?: string | null;
+}
+
+/** A MAC as the registry and the trackers compare it: lower case, colon separated ("3C-6A-…" → "3c:6a:…"). */
+export function normalMac(mac: string): string {
+  return mac.trim().toLowerCase().replace(/-/g, ":");
 }
 
 export function createHaRegistry(deps: {
@@ -105,6 +125,9 @@ export function createHaRegistry(deps: {
           ...(d.manufacturer ? { manufacturer: d.manufacturer } : {}),
           ...(d.model ? { model: d.model } : {}),
           ...(d.area_id ? { areaId: d.area_id } : {}),
+          macs: (d.connections ?? []).filter(([kind]) => kind === "mac").map(([, mac]) => normalMac(mac)),
+          ...(d.via_device_id ? { viaDeviceId: d.via_device_id } : {}),
+          service: d.entry_type === "service",
         });
       }
       for (const e of entities) {
@@ -118,6 +141,8 @@ export function createHaRegistry(deps: {
           disabled: e.disabled_by !== undefined && e.disabled_by !== null,
           hidden: e.hidden_by !== undefined && e.hidden_by !== null,
           ...(e.entity_category ? { category: e.entity_category } : {}),
+          ...(e.unique_id ? { uniqueId: e.unique_id } : {}),
+          ...(e.translation_key ? { translationKey: e.translation_key } : {}),
         });
       }
       reg.ok = true;

@@ -11,6 +11,7 @@ import { Decisions } from "./views/Decisions";
 import { Heuristics } from "./views/Heuristics";
 import { Connect } from "./views/Connect";
 import { Energy } from "./views/Energy";
+import { Infra } from "./views/Infra";
 
 // The editor is megabytes: loaded the first time the Studio's Editor tab opens.
 const Studio = lazy(() => import("./views/Studio"));
@@ -19,7 +20,10 @@ const Studio = lazy(() => import("./views/Studio"));
  * The verticals: tabs between House and the Studio, each shown once its view says it
  * has something to show. A new one is one entry here (and its view, on VerticalProps).
  */
-const VERTICALS = [{ id: "energy", label: "Energy", View: Energy }] as const satisfies ReadonlyArray<{
+const VERTICALS = [
+  { id: "energy", label: "Energy", View: Energy },
+  { id: "infra", label: "Infra", View: Infra },
+] as const satisfies ReadonlyArray<{
   id: string;
   label: string;
   View: ComponentType<VerticalProps>;
@@ -213,7 +217,7 @@ export default function App() {
         </div>
         {VERTICALS.map(({ id, View }) => (
           <div key={id} style={tab === id ? undefined : { display: "none" }}>
-            <View subscribe={subscribe} connected={connected} visible={tab === id} house={house.view} onAvailable={onAvailable[id]} />
+            <View subscribe={subscribe} connected={connected} visible={tab === id} house={house.view} onAvailable={onAvailable[id]} onDecisions={openDecisions} />
           </div>
         ))}
         <div style={tab === "studio" ? undefined : { display: "none" }}>

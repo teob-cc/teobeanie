@@ -43,6 +43,7 @@ import { noderedTimeline } from "./projections.js";
 import { buildTiles, checkTileCoverage, loadHouseConfig } from "./tiles.js";
 import { createHouseService, type HouseConfig } from "./house/service.js";
 import { createEnergyService } from "./energy/service.js";
+import { createInfraService } from "./infra/service.js";
 import { createEnergyTools } from "./energy/index.js";
 import { loadEnergyFile } from "./energy/file.js";
 import { EMPTY_ENERGY_FILE, type EnergyFile } from "./energy/config.js";
@@ -109,7 +110,7 @@ log(
   "info",
   `house scope: ${allowlist.scope.observed.length} entities observed, ${allowlist.scope.operated.length} operable (policyVersion ${allowlist.policyVersion})`,
 );
-let { tiles, groups } = loadHouseConfig(config.configDir, log);
+let { tiles, groups, infra: infraConfig } = loadHouseConfig(config.configDir, log);
 // energy.json: the energy ledger's tariffs and additions. One that will not do is
 // reported and left out at the start (a reload rejects it, as any working-set file).
 let energyFile: EnergyFile = EMPTY_ENERGY_FILE;
@@ -246,7 +247,8 @@ if (notifier !== undefined && (monitorAlerts || summaryTime.trim() !== "")) {
     log: haLog,
     // The ledger and the house view are made in step 9; the summary first reads them at its time.
     energy: () => energy.overview(),
-    house: () => house.view(),
+    // Every card, the Infra tab's too (the House page leaves those out).
+    house: async () => ({ ...(await house.view()), cards: heuristics.cards() }),
   });
   monitor.start();
   log("info", `monitor: alerts ${monitorAlerts ? `on (HA down after ${haDownMin} min)` : "off"}, daily summary ${summaryTime.trim() || "off"}`);
@@ -424,6 +426,10 @@ const houseConfig = (): HouseConfig => ({
   tiles,
   ...(allowlist.house.outdoor !== undefined ? { outdoor: allowlist.house.outdoor } : {}),
 });
+// HA's registries as the explore tools and the Infra tab read them (refreshed on registry events).
+const haRegistry = createHaRegistry({ ha, log: haLog });
+// 9a. Infra tab: the internet link, the mesh, the network's devices, the tailnet, HA's health.
+const infra = createInfraService({ registry: haRegistry, live: () => bridge.liveCache(), cards: () => heuristics.cards(), config: infraConfig });
 const house = createHouseService({
   ha,
   live: () => bridge.liveCache(),
@@ -432,7 +438,8 @@ const house = createHouseService({
   // The bus's frame union predates "house"; the SSE writer sends any frame by its type.
   publish: (frame) => bus.publish(frame as unknown as StreamFrame),
   listening: () => bus.subscriberCount() > 0,
-  cards: () => heuristics.cards(),
+  // The cards tiles.json puts on the Infra tab are left off the House page.
+  cards: () => heuristics.cards().filter((c) => !infra.onTab(c.key)),
   facts: () => heuristics.facts(),
   log: haLog,
 });
@@ -494,6 +501,7 @@ const reloader = createReloader({
         factSources = next.factSources;
         ({ tiles, groups } = next);
         checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
+        infra.configure(next.infra);
         house.configure(houseConfig());
         energy.configure(next.energy);
         attributeWatched = new Set(prepared.attributeWatched);
@@ -523,8 +531,7 @@ const configWatch = watchConfig({ dir: config.configDir, log, onChange: () => vo
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const version = (JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version: string }).version;
 const mcpCategory = categoryTypes<McpCommand, void>(MCP_CATEGORY);
-// The explore tools' view of HA's registries (refreshed on registry events), and the starter set.
-const haRegistry = createHaRegistry({ ha, log: haLog });
+// The starter set.
 const starterSet = starterPackages();
 // The add-on's mcp_networks option; MCP_NETWORKS (comma-separated CIDRs) overrides it, standalone too.
 // A malformed entry is dropped with a warning rather than stopping the add-on.
@@ -629,6 +636,7 @@ const server = startServer(
     facts: () => heuristics.facts(),
     house,
     energy,
+    infra,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
     studio: {
       configDir: config.configDir,

@@ -291,15 +291,20 @@ describe("loadHouseConfig", () => {
     return d;
   };
 
-  it("no file: no tiles and the generic layout", () => expect(loadHouseConfig(dir(), noLog)).toEqual({ tiles: [], groups: {} }));
+  it("no file: no tiles and the generic layout", () => expect(loadHouseConfig(dir(), noLog)).toEqual({ tiles: [], groups: {}, infra: { cards: [] } }));
   it("reads a file with groups only", () => {
-    expect(loadHouseConfig(dir({ groups: { pin: ["sensor.indoor_co2"] } }), noLog)).toEqual({ tiles: [], groups: { pin: ["sensor.indoor_co2"] } });
+    expect(loadHouseConfig(dir({ groups: { pin: ["sensor.indoor_co2"] } }), noLog)).toEqual({ tiles: [], groups: { pin: ["sensor.indoor_co2"] }, infra: { cards: [] } });
   });
   it("keeps the plain tiles file working", () => {
     const tiles = [{ entityId: "sensor.indoor_co2", label: "CO₂", kind: "co2" }];
-    expect(loadHouseConfig(dir({ tiles }), noLog)).toEqual({ tiles, groups: {} });
+    expect(loadHouseConfig(dir({ tiles }), noLog)).toEqual({ tiles, groups: {}, infra: { cards: [] } });
   });
   it("names the file in a groups error", () => expect(() => loadHouseConfig(dir({ tiles: [], groups: { nope: 1 } }), noLog)).toThrow(/tiles\.json: groups: unknown key/));
+  it("reads the cards for the Infra tab, with or without tiles, and names the file in an error", () => {
+    expect(loadHouseConfig(dir({ infra: { cards: ["health-watch/*"] } }), noLog)).toEqual({ tiles: [], groups: {}, infra: { cards: ["health-watch/*"] } });
+    expect(loadHouseConfig(dir({ tiles: [], infra: { cards: ["health-watch"] } }), noLog).infra).toEqual({ cards: ["health-watch"] });
+    expect(() => loadHouseConfig(dir({ tiles: [], infra: { cards: [1] } }), noLog)).toThrow(/tiles\.json: infra\.cards must be a list/);
+  });
   it("without a file the layout is generic: areas and domains, no room words", () => {
     const { tiles, groups } = loadHouseConfig(dir(), noLog);
     const t = { device_class: "temperature", unit_of_measurement: "°C" };
@@ -317,7 +322,7 @@ describe("loadHouseConfig", () => {
   it("an old-format file (tiles only, label-based roles) loads and renders as before", () => {
     const tiles = [{ entityId: "sensor.p1", label: "Grid import", kind: "power" }];
     const cfg = loadHouseConfig(dir({ tiles }), noLog);
-    expect(cfg).toEqual({ tiles, groups: {} });
+    expect(cfg).toEqual({ tiles, groups: {}, infra: { cards: [] } });
     const l = buildLayout([fact("sensor.p1", "100", { device_class: "power", unit_of_measurement: "W" })], cfg);
     expect(l.entities["sensor.p1"]?.role).toBe("grid_import");
   });
