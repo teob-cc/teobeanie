@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — what the daily summary says
+## 0.6.1 — what the daily summary says
 
 - **The daily summary tells what matters in the house.** Instead of each instance's
   action counts, it reports yesterday's energy from the ledger (euros, electricity, solar,
