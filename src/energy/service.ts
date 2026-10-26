@@ -106,15 +106,26 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
 
   // ---- Home Assistant's energy preferences, the sources ----
   let prefs: { at: number; prefs: EnergyPrefs } | undefined;
+  /** HA's last answer, kept across configure(): what stands while HA cannot be asked. */
+  let lastPrefs: EnergyPrefs | undefined;
   const sources = async (): Promise<ResolvedSources> => {
     if (prefs === undefined || now() - prefs.at > PREFS_TTL_MS) {
       try {
         prefs = { at: now(), prefs: await deps.ha.send<EnergyPrefs>({ type: "energy/get_prefs" }) };
       } catch (err) {
-        // No preferences (HA without the energy dashboard set up): energy.json alone.
+        // HA answers not_found when its energy dashboard was never set up: energy.json alone.
+        // Anything else (disconnected, a timeout) is no answer. Taken as "no preferences" it
+        // would close every day again with fewer sources (HOME-73), so the last answer stands
+        // and HA is asked again on the next call; with none yet, the caller fails.
+        if ((err as { code?: unknown } | null)?.code !== "not_found") {
+          deps.log("warn", `energy: could not read the energy preferences (${String(err)})`);
+          if (lastPrefs === undefined) throw err;
+          return resolveSources(lastPrefs, file, deps.outdoorTemperature?.());
+        }
         deps.log("debug", `energy: no energy preferences (${String(err)})`);
         prefs = { at: now(), prefs: {} };
       }
+      lastPrefs = prefs.prefs;
     }
     return resolveSources(prefs.prefs, file, deps.outdoorTemperature?.());
   };

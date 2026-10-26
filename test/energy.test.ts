@@ -639,6 +639,42 @@ describe("createEnergyService", () => {
     expect(res.year!.ledger.days).toBe(3);
   });
 
+  it("keeps the last preferences while HA cannot be asked, and closes nothing again with fewer sources", async () => {
+    const { make, record, ha } = service();
+    const closedNow = () => record.mock.calls.flatMap((c) => c[0]).filter((e): e is Extract<EnergyEvent, { tag: "DayClosed" }> => e.tag === "DayClosed");
+    const lost = Object.assign(new Error("Home Assistant connection lost"), { name: "HaDisconnectedError" });
+    const prefs = ha.send.getMockImplementation()!;
+    // No answer yet at the first start: nothing is closed, and it is tried again later.
+    ha.send.mockImplementation(async (m) => (m.type === "energy/get_prefs" ? Promise.reject(lost) : prefs(m)));
+    const svc = make();
+    svc.start();
+    await svc.catchUp();
+    expect(closedNow()).toHaveLength(0);
+    expect(await svc.overview().catch((e: unknown) => e)).toBe(lost);
+    // HA answers: the days close.
+    ha.send.mockImplementation(prefs);
+    await svc.catchUp();
+    expect(closedNow()).toHaveLength(3);
+    // The connection drops after the preferences' cache was cleared: the last ones stand.
+    ha.send.mockImplementation(async (m) => (m.type === "energy/get_prefs" ? Promise.reject(lost) : prefs(m)));
+    svc.configure(parseEnergyFile(undefined));
+    await svc.catchUp();
+    expect(closedNow()).toHaveLength(3);
+    expect((await svc.overview()).sources.gridImport).not.toEqual([]);
+  });
+
+  it("takes HA's not_found as no energy dashboard: energy.json alone", async () => {
+    const { make, ha } = service({ file: { water: { stat: "sensor.water_meter", price: 1 } } });
+    ha.send.mockImplementation(async (m) => {
+      if (m.type === "energy/get_prefs") throw Object.assign(new Error("No prefs"), { code: "not_found" });
+      return [];
+    });
+    const svc = make();
+    svc.start();
+    await svc.catchUp();
+    expect((await svc.overview()).sources).toMatchObject({ gridImport: [], water: ["sensor.water_meter"] });
+  });
+
   it("says there is nothing to show without sources", async () => {
     const { make, ha } = service();
     ha.send.mockImplementation(async () => ({}));
