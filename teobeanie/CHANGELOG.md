@@ -1,7 +1,18 @@
 # Changelog
 
-## Unreleased
+## Unreleased — what the daily summary says
 
+- **The daily summary tells what matters in the house.** Instead of each instance's
+  action counts, it reports yesterday's energy from the ledger (euros, electricity, solar,
+  gas for heating and hot water, water, showers, the biggest devices, degree days, the
+  heat pump route, the day's data problems) and what needs a look now: alarms, open doors
+  and windows, low batteries, sensors not reporting, instance cards with a bad field,
+  Teobeanie's own open problems, and a pause.
+- **The energy ledger no longer zeroes its history when Home Assistant does not answer.**
+  A failed `energy/get_prefs` (a dropped connection, a timeout) was taken as "no energy
+  dashboard", and every day was closed again with energy.json's sources alone: zero
+  electricity, gas and devices. Now only HA's own "not found" means no dashboard; otherwise
+  the last preferences stand, and before the first answer nothing is closed.
 - **A press Home Assistant repeats is not a press.** An event entity's state is the time of
   its last press, and Home Assistant restores it when the entity comes back from
   unavailable (a Zigbee or Thread button that dropped off the network for a second); the

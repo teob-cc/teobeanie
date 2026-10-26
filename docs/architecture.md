@@ -680,7 +680,8 @@ src/
   audit.ts           the ha-audit aggregate; attribution.ts: who made each call
   projections.ts     the call timeline view
   telegram.ts        the command lane (getUpdates)
-  monitor.ts         self-monitoring and the daily summary
+  monitor.ts         self-monitoring, and the daily summary's schedule
+  daily.ts           the daily summary's text: yesterday's energy, what needs a look
   reload.ts          file watch (recursive), POST api/reload, apply all-or-nothing, the panel's edits
   working-set.ts     the teob-config stream (ConfigChanged), in-place heuristics.json edits, api/instances/…/mode
   revisions.ts       the working set's revisions (/data/revisions), diff, rollback, api/revisions

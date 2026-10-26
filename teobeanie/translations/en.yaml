@@ -31,7 +31,7 @@ configuration:
     description: Tell the Telegram chat when Home Assistant is unreachable, an action is refused or fails, a heuristic throws, or another automation calls an entity an active heuristic controls. One message per problem until it clears, at most 6 an hour.
   monitor_summary_time:
     name: Daily summary time
-    description: Local time (HH:MM, e.g. 21:00) of a daily summary in the Telegram chat, per heuristic instance. Empty for none.
+    description: Local time (HH:MM, e.g. 08:00) of a daily summary in the Telegram chat — yesterday's energy, and what needs a look (low batteries, sensors not reporting, open doors, problems). Empty for none.
   monitor_ha_down_min:
     name: Home Assistant down (minutes)
     description: How long Home Assistant may be unreachable before the chat is told.

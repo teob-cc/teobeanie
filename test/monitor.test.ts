@@ -311,24 +311,12 @@ describe("the global pause", () => {
     expect(h.sent).toEqual([]);
   });
 
-  it("is in the daily summary: each pause and resume, and a pause that still holds", () => {
-    const FROM = Date.UTC(2026, 9, 13, 19, 0); // Tue 21:00 CEST
-    const TO = Date.UTC(2026, 9, 14, 19, 0);
+  it("is in the daily summary while it holds", async () => {
     const h = harness({ alerts: false });
-    h.journal.add("teob-control", "pause", FROM + HOUR, { tag: "Paused", at: FROM + HOUR, by: "person:alex", reason: "away" });
-    h.journal.add("teob-control", "pause", FROM + 10 * HOUR, { tag: "Resumed", at: FROM + 10 * HOUR, by: "person:alex" });
-    h.journal.add("teob-control", "pause", FROM + 20 * HOUR, { tag: "Paused", at: FROM + 20 * HOUR, by: "user:01234567" });
-    expect(h.monitor.summary(FROM, TO)).toBe(
-      [
-        "Teobeanie daily summary since Tue 21:00",
-        "No actions.",
-        "Pause: paused Tue 22:00 by alex (away), resumed Wed 07:00 by alex, paused Wed 17:00 by user:01234567, still paused, only guards act",
-      ].join("\n"),
-    );
-    // The next day nothing changed: the pause from before the window still holds.
-    expect(h.monitor.summary(TO, TO + 24 * HOUR)).toBe(
-      ["Teobeanie daily summary since Wed 21:00", "No actions.", "Pause: still paused since Wed 17:00 by user:01234567, only guards act"].join("\n"),
-    );
+    h.journal.add("teob-control", "pause", T0 - 2 * HOUR, { tag: "Paused", at: T0 - 2 * HOUR, by: "person:alex", reason: "away" });
+    expect(await h.monitor.summary(T0)).toBe(["Teobeanie, Wed 14 Oct", "", "Needs attention:", "- All heuristics paused since 10:00 by alex: only guards act"].join("\n"));
+    h.journal.add("teob-control", "pause", T0 + HOUR, { tag: "Resumed", at: T0 + HOUR, by: "person:alex" });
+    expect(await h.monitor.summary(T0 + 2 * HOUR)).toBe("Teobeanie, Wed 14 Oct\n\nNothing needs attention.");
   });
 });
 
@@ -386,99 +374,88 @@ describe("options", () => {
 });
 
 describe("daily summary", () => {
-  const FROM = Date.UTC(2026, 9, 13, 19, 0); // Tue 21:00 CEST
-  const TO = Date.UTC(2026, 9, 14, 19, 0); // Wed 21:00 CEST
+  /** Lets the summary's reads settle, then its post. */
+  const settle = () => new Promise<void>((r) => setImmediate(r));
 
-  it("counts each instance's actions, refusals, failures and errors in the window", () => {
-    const h = harness({ alerts: false, summaryTime: "21:00" });
-    const j = h.journal;
-    // sensor-light/porch acted before: not its first action
-    j.add("sensor-light", "porch", FROM - 2 * 24 * HOUR, { tag: "ActionRequested", actionId: "p0", action: call("light.turn_on", "light.porch") });
-    for (let i = 0; i < 3; i++) j.add("sensor-light", "porch", FROM + (i + 1) * HOUR, { tag: "ActionRequested", actionId: `p${i + 1}`, action: call("light.turn_on", "light.porch") });
-    j.add("sensor-light", "porch", FROM + 5 * HOUR, { tag: "ActionRefused", actionId: "p9", action: call("light.turn_on", "light.porch"), reason: "rate limit" });
-    // climate/attic: shadow history, then its first real call today, one failed, one interrupted
-    j.add("climate", "attic", FROM - 5 * 24 * HOUR, { tag: "ActionSuppressed", actionId: "c0", action: call("climate.turn_on", "climate.attic") });
-    j.add("climate", "attic", FROM + HOUR, { tag: "ActionRequested", actionId: "c1", action: call("climate.turn_on", "climate.attic") });
-    j.add("climate", "attic", FROM + HOUR, { tag: "ActionCompleted", actionId: "c1", ok: false, error: "timeout" });
-    j.add("climate", "attic", FROM + 2 * HOUR, { tag: "ActionCompleted", actionId: "c2", ok: false, error: "interrupted by restart" });
-    // door-nag/shed in shadow: would-be notices, an error
-    j.add("door-nag", "shed", FROM + 3 * HOUR, { tag: "ActionSuppressed", actionId: "d1", action: notice });
-    j.add("door-nag", "shed", FROM + 4 * HOUR, { tag: "ActionSuppressed", actionId: "d2", action: notice });
-    j.add("door-nag", "shed", FROM + 4 * HOUR, { tag: "DecideFailed", input: { kind: "start" }, error: "x" });
-    // outside the window
-    j.add("sensor-light", "porch", TO, { tag: "ActionRequested", actionId: "late", action: call("light.turn_off", "light.porch") });
-    j.add("sensor-light", "porch", FROM - 1000, { tag: "ActionRequested", actionId: "early", action: call("light.turn_off", "light.porch") });
-    // others on Teobeanie's entities: a system user and a device on owned ones; a person and a shadow instance's entity are left out
-    j.add("ha-audit", "nodered", FROM + HOUR, audit("system:Supervisor", "light.turn_off", "light.porch"));
-    j.add("ha-audit", "nodered", FROM + 2 * HOUR, audit("system:Supervisor", "light.turn_off", "light.porch"));
-    j.add("ha-audit", "nodered", FROM + 2 * HOUR, audit("device", "climate.turn_on", "climate.attic"));
-    j.add("ha-audit", "nodered", FROM + 2 * HOUR, audit("person:Alex", "light.turn_off", "light.porch"));
-    j.add("ha-audit", "nodered", FROM + 2 * HOUR, audit("system:Supervisor", "light.turn_on", "light.shed"));
-
-    expect(h.monitor.summary(FROM, TO)).toBe(
+  it("lists Teobeanie's own problems still open, and drops them once they clear", async () => {
+    const h = harness({ alerts: false });
+    h.persist("climate/attic", { tag: "DecideFailed", input: { kind: "start" }, error: "boom" });
+    h.persist("ha-audit/nodered", audit("system:Supervisor", "light.turn_on", "light.porch"));
+    expect(await h.monitor.summary(h.clock.now())).toBe(
       [
-        "Teobeanie daily summary since Tue 21:00",
-        "climate/attic: 1 call, 1 failed, first action ever",
-        "door-nag/shed: 2 shadow notices, 1 error",
-        "sensor-light/porch: 3 calls, 1 refused",
-        "Calls by others on Teobeanie's entities: climate.attic by device 1x; light.porch by system:Supervisor 2x",
+        "Teobeanie, Wed 14 Oct",
+        "",
+        "Needs attention:",
+        "- climate/attic failed deciding on start: boom",
+        "- Supervisor (a system user) called light.turn_on on light.porch, which sensor-light/porch controls. Another automation may be working against Teobeanie.",
       ].join("\n"),
     );
-    // the next day climate/attic is no longer new
-    j.add("climate", "attic", TO + HOUR, { tag: "ActionRequested", actionId: "c3", action: call("climate.turn_off", "climate.attic") });
-    expect(h.monitor.summary(TO, TO + 24 * HOUR)).toBe(["Teobeanie daily summary since Wed 21:00", "climate/attic: 1 call", "sensor-light/porch: 1 call"].join("\n"));
+    h.persist("climate/attic", decided());
+    // A day later the call by another is no longer recent.
+    h.clock.advance(25 * HOUR);
+    expect(await h.monitor.summary(h.clock.now())).toBe("Teobeanie, Thu 15 Oct\n\nNothing needs attention.");
   });
 
-  it("says so when nothing happened", () => {
-    const h = harness({ alerts: false });
-    expect(h.monitor.summary(FROM, TO)).toBe("Teobeanie daily summary since Tue 21:00\nNo actions.");
+  it("says so when the energy ledger or the house cannot be read", async () => {
+    const clock = fakeClock(T0);
+    const monitor = createMonitor({
+      notifier: { send: async () => {} },
+      options: { alerts: false },
+      instances: () => INSTANCES,
+      journal: fakeJournal(),
+      timeZone: TZ,
+      log: () => {},
+      clock,
+      energy: async () => Promise.reject(new Error("Home Assistant connection lost")),
+      house: async () => Promise.reject(new Error("no states yet")),
+    });
+    expect(await monitor.summary(T0)).toBe(
+      ["Teobeanie, Wed 14 Oct", "Energy: the ledger could not be read (Home Assistant connection lost)", "", "Needs attention:", "- The house could not be read (no states yet)"].join("\n"),
+    );
   });
 
-  it("is posted at the local time each day, across the end of DST", () => {
+  it("is posted at the local time each day, across the end of DST", async () => {
     // Sat 24 Oct 2026 12:00 CEST; DST ends Sun 25 Oct 03:00 → 02:00.
     const h = harness({ alerts: false, summaryTime: "21:00" }, { start: Date.UTC(2026, 9, 24, 10, 0) });
     h.monitor.start();
     h.clock.to(Date.UTC(2026, 9, 24, 19, 0) - 1);
+    await settle();
     expect(h.sent).toEqual([]);
     h.clock.advance(1);
-    expect(h.sent).toEqual(["Teobeanie daily summary since Fri 21:00\nNo actions."]);
+    await settle();
+    expect(h.sent).toEqual(["Teobeanie, Sat 24 Oct\n\nNothing needs attention."]);
     // 21:00 CET on Sunday is 20:00 UTC: 25 hours later
     h.clock.to(Date.UTC(2026, 9, 25, 19, 59));
+    await settle();
     expect(h.sent).toHaveLength(1);
     h.clock.to(Date.UTC(2026, 9, 25, 20, 0));
-    expect(h.sent).toHaveLength(2);
-    expect(h.sent[1]).toBe("Teobeanie daily summary since Sat 21:00\nNo actions.");
+    await settle();
+    expect(h.sent).toEqual(["Teobeanie, Sat 24 Oct\n\nNothing needs attention.", "Teobeanie, Sun 25 Oct\n\nNothing needs attention."]);
   });
 
-  it("reads the window from the journal, so a restart during the day loses nothing", () => {
-    const h = harness({ alerts: false, summaryTime: "21:00" });
-    // journaled this morning, before this process started
-    h.journal.add("sensor-light", "porch", T0 - 4 * 24 * HOUR, { tag: "ActionRequested", actionId: "p0", action: call("light.turn_on", "light.porch") });
-    h.journal.add("sensor-light", "porch", T0 - 3 * HOUR, { tag: "ActionRequested", actionId: "p1", action: call("light.turn_on", "light.porch") });
-    h.monitor.start();
-    h.clock.to(TO);
-    expect(h.sent).toEqual(["Teobeanie daily summary since Tue 21:00\nsensor-light/porch: 1 call"]);
-  });
-
-  it("crosses midnight, and follows the house's time zone once it is known", () => {
+  it("crosses midnight, and follows the house's time zone once it is known", async () => {
     // Process in UTC until HA says Amsterdam; summary at 00:15.
     const start = Date.UTC(2026, 9, 14, 21, 0); // 23:00 CEST
     const h = harness({ alerts: false, summaryTime: "00:15" }, { start, tz: "UTC" });
     h.monitor.start();
     h.monitor.setTimeZone(TZ);
     h.clock.to(Date.UTC(2026, 9, 14, 22, 15) - 1);
+    await settle();
     expect(h.sent).toEqual([]);
     h.clock.advance(1);
-    expect(h.sent).toEqual(["Teobeanie daily summary since Wed 00:15\nNo actions."]);
+    await settle();
+    expect(h.sent).toEqual(["Teobeanie, Thu 15 Oct\n\nNothing needs attention."]);
   });
 
-  it("lands a time the start of DST skips an hour later", () => {
+  it("lands a time the start of DST skips an hour later", async () => {
     // Sun 29 Mar 2026: 02:00 CET → 03:00 CEST; 02:30 does not exist.
     const h = harness({ alerts: false, summaryTime: "02:30" }, { start: Date.UTC(2026, 2, 28, 12, 0) });
     h.monitor.start();
     h.clock.to(Date.UTC(2026, 2, 29, 1, 30) - 1);
+    await settle();
     expect(h.sent).toEqual([]);
     h.clock.advance(1);
+    await settle();
     expect(h.sent).toHaveLength(1);
   });
 });

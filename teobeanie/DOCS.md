@@ -200,10 +200,18 @@ messages an hour in all; the rest go to the add-on log, and the next message say
 many were held back. Messages start with `Teobeanie:`.
 
 With `monitor_summary_time` set, a summary follows each day at that local time (the
-time zone of your Home Assistant): per instance the calls and notices since the same
-time the day before, shadow calls, refusals, failures, errors, an instance's first
-action ever, and calls by system users or devices on entities active instances control.
-It is read from the journal, so a restart during the day loses nothing.
+time zone of your Home Assistant). It has two parts:
+
+- **Yesterday's energy**, from the energy ledger's closed day: the euros, electricity in,
+  out and solar, gas (split into heating and hot water when the boiler's states are
+  known), water, the fixed charges, showers, the three devices that used most, the degree
+  days and the euros per degree day, what a heat pump would have cost instead, and what
+  was wrong with that day's data. A house without energy sources leaves this part out.
+- **What needs a look now:** alarms on, doors and windows open, low batteries (below
+  20 %), sensors not reporting, each instance card with a bad field (a `health-watch`
+  check, for example), Teobeanie's own problems still open from the last day, and a
+  pause that holds. These read the house scope, so a battery outside the scope is not
+  listed.
 
 ## Data
 

@@ -13,20 +13,24 @@
 // One message per problem until it clears: by its own event (the next accepted action,
 // the next decision, HA back) or after an hour without a recurrence. At most
 // maxPerHour messages an hour in all; what the limit holds back is logged and counted
-// in the next message. Optionally, a daily summary at a local time, read from the
-// journal, so a restart during the day loses nothing.
+// in the next message. Optionally, a daily summary at a local time (daily.ts):
+// yesterday's energy from the ledger, and what needs a look now, its own problems still
+// open among them.
 //
 // The monitor sends through the notifier directly: no heuristic's rate limit hides its
 // messages, and nothing it does is journaled, so it never sees (or answers) itself.
 
-import type { JournalQueryRow, JournalReader } from "@lambda-house/teob-ts/core";
+import type { JournalReader } from "@lambda-house/teob-ts/core";
 import type { Notifier } from "./kernel/actuator.js";
 import type { Action } from "./kernel/heuristic.js";
 import type { InstanceInfo } from "./kernel/host.js";
 import { INTERRUPTED, type InputSummary, type KernelEvent } from "./kernel/step.js";
-import { localTimeOn, nextLocalTime } from "./kernel/clock.js";
+import { nextLocalTime } from "./kernel/clock.js";
 import { AUDIT_CATEGORY, type AuditEvent } from "./audit.js";
 import { CONTROL_CATEGORY, PAUSE_ENTITY, pauseFromJournal, type PauseEvent } from "./pause.js";
+import { dailySummary } from "./daily.js";
+import type { EnergyOverview } from "./energy/types.js";
+import type { HouseView } from "./house/view.js";
 
 export interface MonitorOptions {
   /** Post problems as they happen. */
@@ -61,8 +65,8 @@ export interface Monitor {
   /** Start counting HA as down until it connects, and schedule the summary. */
   start(): void;
   stop(): void;
-  /** The summary of what the journal holds in [from, to), as it would be posted. */
-  summary(from: number, to: number): string;
+  /** The daily summary as it would be posted at `at`. */
+  summary(at: number): Promise<string>;
 }
 
 type Log = (level: "debug" | "info" | "warn" | "error", msg: string) => void;
@@ -132,6 +136,10 @@ export function createMonitor(deps: {
   timeZone: string;
   log: Log;
   clock?: MonitorClock;
+  /** The summary's energy: the ledger's overview. Absent: no energy part. */
+  energy?: () => Promise<EnergyOverview>;
+  /** The summary's house: the scope's states and the instances' cards. Absent: no house part. */
+  house?: () => Promise<HouseView>;
 }): Monitor {
   const clock: MonitorClock = deps.clock ?? {
     now: () => Date.now(),
@@ -151,15 +159,13 @@ export function createMonitor(deps: {
   }
   let timeZone = deps.timeZone;
 
-  /** Open problems: key → when it last recurred. */
-  const open = new Map<string, number>();
+  /** Open problems: key → when it last recurred, and the message that told it. */
+  const open = new Map<string, { at: number; text: string }>();
   /** Send times of the alerts in the last hour. */
   let sent: number[] = [];
   let heldBack = 0;
   /** Requested actions not yet completed: actionId → instance and action. */
   const pending = new Map<string, { key: string; action: Action }>();
-  /** Instances known to have acted before (the summary's "first action ever"). */
-  const acted = new Set<string>();
 
   let connected = false;
   let downSince: number | undefined;
@@ -188,16 +194,18 @@ export function createMonitor(deps: {
     post(text + more);
   };
 
-  /** Report a problem unless it is open already. Several keys: one message, each key open. */
+  /**
+   * Report a problem unless it is open already. Several keys: one message, each key open.
+   * With alerts off it is only kept open, for the daily summary.
+   */
   const raise = (keys: string[], text: string): void => {
-    if (!alerts) return;
     const now = clock.now();
     const fresh = keys.filter((k) => {
       const last = open.get(k);
-      return last === undefined || now - last >= QUIET_MS;
+      return last === undefined || now - last.at >= QUIET_MS;
     });
-    for (const k of keys) open.set(k, now);
-    if (fresh.length > 0) alert(text);
+    for (const k of keys) open.set(k, { at: now, text });
+    if (alerts && fresh.length > 0) alert(text);
   };
 
   const clear = (key: string): void => {
@@ -292,109 +300,30 @@ export function createMonitor(deps: {
       downTimer = undefined;
       if (connected || downSince === undefined) return;
       downReported = true;
-      open.set("ha", clock.now());
-      alert(`Teobeanie: Home Assistant has been unreachable for ${Math.round((clock.now() - downSince) / 60_000)} min. Heuristics cannot see or switch anything until it is back.`);
+      const text = `Teobeanie: Home Assistant has been unreachable for ${Math.round((clock.now() - downSince) / 60_000)} min. Heuristics cannot see or switch anything until it is back.`;
+      open.set("ha", { at: clock.now(), text });
+      alert(text);
     }, haDownMs);
   };
 
   // ---- daily summary ----
 
-  /** Every row of one stream (or category) in [from, to), oldest first. */
-  function rows(q: { category: string; entityId?: string }, from: number, to: number): JournalQueryRow[] {
-    const out: JournalQueryRow[] = [];
-    let cursor: number | undefined;
-    for (;;) {
-      const page = deps.journal.queryEvents({ ...q, sinceMs: from, order: "asc", limit: 1000, ...(cursor !== undefined ? { cursor } : {}) });
-      for (const r of page) {
-        if (r.ts * 1000 >= to) return out;
-        out.push(r);
-      }
-      if (page.length < 1000) return out;
-      cursor = page.at(-1)!.globalSeq;
-    }
-  }
-
-  /** Whether the instance requested any action before `before` (scans its stream once). */
-  function actedBefore(i: { key: string; heuristic: string; id: string }, before: number): boolean {
-    if (acted.has(i.key)) return true;
-    let cursor: number | undefined;
-    for (;;) {
-      const page = deps.journal.queryEvents({ category: i.heuristic, entityId: i.id, order: "asc", limit: 1000, ...(cursor !== undefined ? { cursor } : {}) });
-      for (const r of page) {
-        if (r.ts * 1000 >= before) return false;
-        if ((r.payload as { tag?: string } | null)?.tag === "ActionRequested") {
-          acted.add(i.key);
-          return true;
-        }
-      }
-      if (page.length < 1000) return false;
-      cursor = page.at(-1)!.globalSeq;
-    }
-  }
-
-  function summary(from: number, to: number): string {
-    const dayTime = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-    /** "Tue 21:00", house time. */
-    const at = (ms: number): string => dayTime.format(new Date(ms));
-    const lines = [`Teobeanie daily summary since ${at(from)}`];
-    const instances = [...deps.instances()].sort((a, b) => a.key.localeCompare(b.key));
-    for (const i of instances) {
-      const c = { calls: 0, notices: 0, shadowCalls: 0, shadowNotices: 0, refused: 0, failed: 0, errors: 0 };
-      for (const r of rows({ category: i.heuristic, entityId: i.id }, from, to)) {
-        const e = r.payload as KernelEvent;
-        if (e.tag === "ActionRequested") {
-          if (e.action.kind === "call") c.calls++;
-          else c.notices++;
-        } else if (e.tag === "ActionSuppressed") {
-          if (e.action.kind === "call") c.shadowCalls++;
-          else c.shadowNotices++;
-        } else if (e.tag === "ActionRefused") c.refused++;
-        else if (e.tag === "ActionCompleted" && !e.ok && e.error !== INTERRUPTED) c.failed++;
-        else if (e.tag === "DecideFailed") c.errors++;
-      }
-      const parts = [
-        c.calls > 0 ? plural(c.calls, "call") : "",
-        c.notices > 0 ? plural(c.notices, "notice") : "",
-        c.shadowCalls > 0 ? plural(c.shadowCalls, "shadow call") : "",
-        c.shadowNotices > 0 ? plural(c.shadowNotices, "shadow notice") : "",
-        c.refused > 0 ? `${c.refused} refused` : "",
-        c.failed > 0 ? `${c.failed} failed` : "",
-        c.errors > 0 ? plural(c.errors, "error") : "",
-        c.calls + c.notices > 0 && !actedBefore(i, from) ? "first action ever" : "",
-      ].filter(Boolean);
-      if (c.calls + c.notices > 0) acted.add(i.key);
-      if (parts.length > 0) lines.push(`${i.key}: ${parts.join(", ")}`);
-    }
-    if (lines.length === 1) lines.push("No actions.");
-
-    // The pause: each pause and resume in the window, and whether it still holds.
-    const changes = rows({ category: CONTROL_CATEGORY, entityId: PAUSE_ENTITY }, from, to)
-      .map((r) => r.payload as PauseEvent)
-      .filter((e) => (e.tag === "Paused" || e.tag === "Resumed") && e.at >= from && e.at < to);
-    const end = pauseFromJournal(deps.journal, to);
-    const still = end.paused ? `still paused${end.at !== undefined && end.at < from ? ` since ${at(end.at)} by ${who(end.by ?? "?")}` : ""}, only guards act` : "";
-    if (changes.length > 0 || still !== "") {
-      const each = changes.map((e) => `${e.tag === "Paused" ? "paused" : "resumed"} ${at(e.at)} by ${who(e.by)}${e.tag === "Paused" && e.reason !== undefined ? ` (${e.reason})` : ""}`);
-      lines.push(`Pause: ${[...each, still].filter(Boolean).join(", ")}`);
-    }
-
-    // Calls not by Teobeanie (nor a person) on what an active instance controls.
-    const controlled = new Set(instances.filter((i) => i.mode === "active").flatMap((i) => [...i.actuates, ...i.uses]));
-    const others = new Map<string, number>();
-    if (controlled.size > 0) {
-      for (const r of rows({ category: AUDIT_CATEGORY }, from, to)) {
-        const e = r.payload as AuditEvent;
-        const by = String(e.by ?? "");
-        if (!(by === "device" || by.startsWith("system:")) || PEOPLE_PROXIES.has(by)) continue;
-        for (const x of e.entityIds ?? []) {
-          if (controlled.has(x)) others.set(`${x} by ${by}`, (others.get(`${x} by ${by}`) ?? 0) + 1);
-        }
-      }
-    }
-    if (others.size > 0) {
-      lines.push(`Calls by others on Teobeanie's entities: ${[...others].sort().map(([k, n]) => `${k} ${n}x`).join("; ")}`);
-    }
-    return lines.join("\n");
+  /** Yesterday's energy and what needs a look now; a part that cannot be read says so. */
+  async function summary(at: number): Promise<string> {
+    const read = async <T>(f: (() => Promise<T>) | undefined): Promise<T | Error | undefined> =>
+      f === undefined ? undefined : f().catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+    const [energy, house] = await Promise.all([read(deps.energy), read(deps.house)]);
+    // Teobeanie's own problems that recurred in the last day and have not cleared.
+    const problems = [...new Set([...open.values()].filter((p) => p.at > at - 24 * HOUR_MS).sort((a, b) => a.at - b.at).map((p) => p.text))];
+    const pause = pauseFromJournal(deps.journal, at);
+    return dailySummary({
+      at,
+      timeZone,
+      ...(energy !== undefined ? { energy } : {}),
+      ...(house !== undefined ? { house } : {}),
+      problems,
+      ...(pause.paused ? { pause: { ...(pause.at !== undefined ? { since: pause.at } : {}), ...(pause.by !== undefined ? { by: who(pause.by) } : {}) } } : {}),
+    });
   }
 
   const scheduleSummary = (): void => {
@@ -408,11 +337,9 @@ export function createMonitor(deps: {
         summaryTimer = clock.setTimeout(fire, at - clock.now());
         return;
       }
-      try {
-        post(summary(localTimeOn(at, -1, summaryAt, timeZone), at));
-      } catch (err) {
-        deps.log("error", `monitor: daily summary: ${String(err)}`);
-      }
+      summary(at)
+        .then(post)
+        .catch((err: unknown) => deps.log("error", `monitor: daily summary: ${String(err)}`));
       scheduleSummary();
     };
     summaryTimer = clock.setTimeout(fire, at - clock.now());

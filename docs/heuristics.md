@@ -855,11 +855,13 @@ while it is open, at most 6 an hour in all. The monitor sends through the notifi
 directly: no heuristic's `notifyPerHour` holds its messages back, and nothing it sends
 is journaled, so it never sees itself.
 
-The daily summary (`monitor_summary_time`) is a query over the journal for the day
-up to the summary time, in HA's time zone: per instance its calls, notices, shadow
-calls and notices, refusals, failures, errors and a first action ever; each pause and
-resume, and a pause that still holds; and the calls by system users and devices on
-entities active instances control.
+The daily summary (`monitor_summary_time`, in HA's time zone; `src/daily.ts`) reports
+yesterday's closed day from the energy ledger (each carrier's quantities and euros, the
+gas split, showers, the biggest devices, degree days, the heat pump route and the day's
+data flags). It then lists what needs a look now: the house view's `attention()`
+(alarms on, doors and windows open, low batteries, sensors not reporting), every
+instance card's fields with `tone: "bad"`, the monitor's own problems still open from
+the last day, and a pause that holds. A part that cannot be read says so in the message.
 
 ## Testing
 

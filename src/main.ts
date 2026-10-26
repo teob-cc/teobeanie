@@ -244,6 +244,9 @@ if (notifier !== undefined && (monitorAlerts || summaryTime.trim() !== "")) {
     journal,
     timeZone: houseZone(houseFacts),
     log: haLog,
+    // The ledger and the house view are made in step 9; the summary first reads them at its time.
+    energy: () => energy.overview(),
+    house: () => house.view(),
   });
   monitor.start();
   log("info", `monitor: alerts ${monitorAlerts ? `on (HA down after ${haDownMin} min)` : "off"}, daily summary ${summaryTime.trim() || "off"}`);
