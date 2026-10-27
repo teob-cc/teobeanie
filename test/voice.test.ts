@@ -378,3 +378,25 @@ describe("telegram: voice messages", () => {
     expect((await run(voiceUpdate(-1001), false)).taken).toEqual([]);
   });
 });
+
+describe("voice_try", () => {
+  it("phrases as if heard: what each would run, nothing run, journaled; with expectations, which pass", async () => {
+    const { createVoiceTools, meets } = await import("../src/voice/tools.js");
+    const h = laneHarness({
+      file: { ...VOICE, mode: "off" },
+      llm: scripted([[["pet", { where: "home" }]], [["not_an_instruction", { reply: "Это не команда." }]]]),
+    });
+    const [t] = createVoiceTools({ lane: h.lane, caller: () => "mcp:agent" });
+    const res = await t!.execute({ say: ["код дома", "купи молоко"], expect: ["/pet home", "clarify"] });
+    const body = res.output as { passed: number; of: number; results: Array<{ calls: string[]; pass: boolean }> };
+    expect(body.passed).toBe(1);
+    expect(body.of).toBe(2);
+    expect(body.results.map((r) => r.calls)).toEqual([["/pet home"], []]);
+    expect(h.dispatched).toEqual([]);
+    expect(h.records.map((r) => [r.chat, r.by, r.mode, r.kind])).toEqual([
+      ["mcp", "mcp:agent", "shadow", "instruction"],
+      ["mcp", "mcp:agent", "shadow", "not_instruction"],
+    ]);
+    expect(meets({ say: "", kind: "instruction", calls: ["/pet away", "/warm den 20"] }, "/warm den 20; /pet away")).toBe(true);
+  });
+});

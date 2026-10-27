@@ -59,10 +59,28 @@ export interface VoiceLaneDeps {
   now?: () => number;
 }
 
+/** A phrase tried as if it had been heard (voice_try): what would run, nothing runs. */
+export interface VoiceTrial {
+  say: string;
+  kind: string;
+  calls: string[];
+  reply?: string;
+  reason?: string;
+  turns?: number;
+  model?: string;
+  cost?: number;
+  trace?: Understood["trace"];
+}
+
 export interface VoiceLane {
   /** Take a message: queued behind the ones before it; resolves when it is handled. */
   take(msg: VoiceMessage, io: VoiceIo): Promise<void>;
   enabled(): boolean;
+  /**
+   * A phrase as if heard, in any mode: understood, never run, journaled (its cost counts).
+   * For the agent: try what people will say before voice goes active.
+   */
+  trial(say: string, by: string): Promise<VoiceTrial>;
 }
 
 export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
@@ -104,20 +122,9 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
     if (llm === undefined) return finish({ kind: "unavailable", transcript, stt, reason: "no model configured" }, `${heardLine}\n${t.unavailable}`);
     if (d.budgetUsd > 0 && d.spent() >= d.budgetUsd) return finish({ kind: "budget", transcript, stt }, `${heardLine}\n${t.budget}`);
 
-    const { surfaces, missing } = surfacesOf(file.commands, d.schemas());
-    if (missing.length > 0) d.log("warn", `voice: ${missing.map((c) => "/" + c).join(", ")} in voice.json, but no running instance gives a schema for it`);
     let u: Understood;
     try {
-      u = await understand(llm, {
-        transcript,
-        speaker: msg.by,
-        surfaces,
-        language: file.language,
-        glossary: file.glossary,
-        context: d.context(surfaces.map((s) => s.command)),
-        now: d.houseTime(msg.at),
-        maxCalls: file.maxCalls,
-      });
+      u = await interpret(file, llm, transcript, msg.by, msg.at);
     } catch (err) {
       d.log("warn", `voice: the model failed: ${String(err)}`);
       return finish({ kind: "unavailable", transcript, stt, reason: String(err) }, `${heardLine}\n${t.unavailable}`);
@@ -156,7 +163,63 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
     );
   }
 
+  /** The model's reading of a transcript, within the surfaces voice.json lists. */
+  function interpret(file: VoiceFile, llm: ChatClient, transcript: string, by: string, at: number): Promise<Understood> {
+    const { surfaces, missing } = surfacesOf(file.commands, d.schemas());
+    if (missing.length > 0) d.log("warn", `voice: ${missing.map((c) => "/" + c).join(", ")} in voice.json, but no running instance gives a schema for it`);
+    return understand(llm, {
+      transcript,
+      speaker: by,
+      surfaces,
+      language: file.language,
+      glossary: file.glossary,
+      context: d.context(surfaces.map((s) => s.command)),
+      now: d.houseTime(at),
+      maxCalls: file.maxCalls,
+    });
+  }
+
+  async function trial(say: string, by: string): Promise<VoiceTrial> {
+    const file = d.file();
+    const llm = d.llm(file.model);
+    if (llm === undefined) throw new Error("no model configured (llm_provider and its key or URL)");
+    if (d.budgetUsd > 0 && d.spent() >= d.budgetUsd) throw new Error("the month's LLM budget is spent");
+    const t0 = now();
+    const u = await interpret(file, llm, say, by, t0);
+    const calls = u.calls.map((c) => commandLine(c.command, c.args));
+    d.record({
+      at: t0,
+      voiceId: ulid(),
+      by,
+      chat: "mcp",
+      seconds: 0,
+      mode: "shadow",
+      kind: u.kind,
+      transcript: say,
+      calls,
+      ...(u.reply !== undefined ? { reply: u.reply } : {}),
+      ...(u.reason !== undefined ? { reason: u.reason } : {}),
+      model: u.model,
+      turns: u.turns,
+      usage: u.usage,
+      trace: u.trace,
+      ms: now() - t0,
+    });
+    return {
+      say,
+      kind: u.kind,
+      calls,
+      ...(u.reply !== undefined ? { reply: u.reply } : {}),
+      ...(u.reason !== undefined ? { reason: u.reason } : {}),
+      turns: u.turns,
+      model: u.model,
+      ...(u.usage.cost !== undefined ? { cost: u.usage.cost } : {}),
+      trace: u.trace,
+    };
+  }
+
   return {
+    trial,
     enabled: () => d.file().mode !== "off",
     take(msg, io) {
       const run = chain.then(() => handle(msg, io));

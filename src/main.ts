@@ -56,6 +56,7 @@ import { createTelegramReceiver } from "./telegram.js";
 import { loadVoiceFile, NO_VOICE, type VoiceFile } from "./voice/file.js";
 import { monthStart, VOICE_ENTITY, voiceAggregate, voiceEventCodec, voiceSpend, voiceStateCodec, VOICE_CATEGORY, type VoiceCommand } from "./voice/journal.js";
 import { createVoiceLane } from "./voice/lane.js";
+import { createVoiceTools } from "./voice/tools.js";
 import { createChatClient, OPENROUTER_URL, type ChatClient } from "./voice/llm.js";
 import { createTranscriber, siblingWhisperUrl } from "./voice/stt.js";
 import { createHeuristicHost, loadInstances, seedConfigExamples } from "./kernel/host.js";
@@ -63,7 +64,7 @@ import { createDeviceResolver } from "./devices.js";
 import { createMonitor, type Monitor } from "./monitor.js";
 import { houseZone, isTimeZone } from "./kernel/clock.js";
 import { createMcp, currentCaller } from "./mcp/index.js";
-import { mcpNetworks as resolveMcpNetworks, networks } from "./mcp/access.js";
+import { callerLabel, mcpNetworks as resolveMcpNetworks, networks } from "./mcp/access.js";
 import { MCP_CATEGORY, MCP_ENTITY, mcpAuditAggregate, mcpEventCodec, mcpStateCodec, type McpCommand } from "./mcp/journal.js";
 import { INSTRUCTIONS, createHouseTools } from "./mcp/tools.js";
 import { DEVELOP_INSTRUCTIONS, createDevelopTools } from "./mcp/develop.js";
@@ -644,6 +645,8 @@ const mcp = createMcp({
     }),
     // The energy ledger, read-only.
     ...createEnergyTools({ energy, timeZone: () => houseZone(houseFacts) }),
+    // Voice: phrases tried as if said (voice_try), never run.
+    ...createVoiceTools({ lane: voiceLane, caller: () => `mcp:${callerLabel(currentCaller() ?? { via: "local" })}` }),
     // All of HA, read-only and never recorded (ha_registry, ha_states, ha_history, ha_services, suggest).
     ...createHaTools({
       ha,

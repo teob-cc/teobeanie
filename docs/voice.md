@@ -83,3 +83,11 @@ transcript, each tool call the model made and what the house said to it, the com
 that ran and the instances they reached, the answer, the tokens and the cost. A command
 that came from a voice message carries `from.ref = "voice:<id>"` in its decision, so the
 decision leads back to the message.
+
+## Trying phrases first
+
+The MCP tool `voice_try` runs phrases through the same loop as if someone had said
+them, in any mode, and runs nothing. Given what each phrase must become
+(`"/warm hall 21 2h; /cat away"`, `not_instruction`, `clarify`), it is the house's eval:
+keep a list of what people really say, and run it after changing voice.json, a schema
+or the model.
