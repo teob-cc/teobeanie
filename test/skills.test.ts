@@ -15,8 +15,8 @@ function frontmatter(text: string): Record<string, string> {
   return Object.fromEntries(m[1]!.split("\n").map((l) => /^([a-z_-]+):\s*(.*)$/.exec(l)).filter((x) => x !== null).map((x) => [x[1]!, x[2]!]));
 }
 
-const TOOL_FILES = ["tools.ts", "ha-tools.ts", "develop.ts"].map((f) => readFileSync(join(root, "src", "mcp", f), "utf8"));
-/** The MCP tools the add-on serves, by name, read from their definitions (the house tools, the explore tools, develop and operate). */
+const TOOL_FILES = [...["tools.ts", "ha-tools.ts", "develop.ts"].map((f) => join("mcp", f)), join("voice", "tools.ts")].map((f) => readFileSync(join(root, "src", f), "utf8"));
+/** The MCP tools the add-on serves, by name, read from their definitions (the house tools, the explore tools, develop and operate, voice). */
 const TOOLS = new Set(TOOL_FILES.flatMap((text) => [...text.matchAll(/tool\(\s*"([a-z_]+)"/g)].map((m) => m[1]!)));
 /** The snake_case words of the tools' code (their arguments and answers' fields) and the add-on's options: the others a skill may name. */
 const NAMES = new Set([

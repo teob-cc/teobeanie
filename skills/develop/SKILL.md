@@ -52,7 +52,8 @@ over SSH: the fallback at the end.
 | `package_install` | a starter package missing from the folder (from a git URL: not yet) |
 | `package_scaffold` | a new package: manifest with roles, code, a passing spec, README, example |
 | `file_read` | a working-set file, or the list of them |
-| `file_write` | one working-set file, whole (`heuristics.json`, `allowlist.json`, `tiles.json`, `heuristics/**`, `packages/**`) |
+| `file_write` | one working-set file, whole (`heuristics.json`, `allowlist.json`, `tiles.json`, `energy.json`, `voice.json`, `heuristics/**`, `packages/**`) |
+| `voice_try` | phrases as if said in the chat: what each would run (nothing runs); with expectations, the house's voice eval |
 | `types` | `heuristics/ha.d.ts` and `.teob/` for editing code (generated, no revision) |
 | `test_run` | specs, per package or file, with vitest's matchers |
 | `replay` | an instance over the recorder's last days (at most 7), facts included |
@@ -160,6 +161,16 @@ defined twice is an error) and run it as a twin.
 spec passes (`kind: "rule"` for a rule). Change it specs first, as above. To share it,
 `package_export` with `name`: the files with the roles' placeholders in the example, or
 the privacy hits to fix first. Never copy a package out of the house any other way.
+
+## A command for voice
+
+A voice message reaches only the commands `voice.json` lists, and each only through its
+heuristic's `commandSchema`: the arguments typed (a choice, a number with its range, a
+duration). Give a command a schema that is exactly what its `decide` accepts, with the
+range from the house's bounds (`boundFor(house, entity, field)`), so the check before a
+call and the behaviour agree. Then, with `voice.json` in `shadow`: `voice_try` with the
+phrases people really say and what each must become, until they all pass. Listing a
+command in `voice.json` is the owner's call, like going active.
 
 ## Fallback: the config folder over SSH
 

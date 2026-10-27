@@ -148,6 +148,17 @@ whom it is paused.
 `heuristics` lists), as the chat would, with you as the sender. The behaviour decides,
 and may act: a garage door opens. Send one only when the owner asks for that command.
 
+## 7a. Voice
+
+`voice.json` decides what a voice message in the chat can do. `active` runs the commands
+the model makes of a message as the person who spoke, so it follows the same rule as an
+instance: the owner says yes after seeing `voice_try` pass on the phrases people really
+say, and a few days of the chat's messages in `shadow` (the bot answers each with what it
+would run; `timeline` and the `teob-voice` stream hold them). Adding a command to
+`commands` is the same decision, per command. Undo: `mode` back to `shadow`, or
+`rollback`. A command from a voice message carries `from.ref` `voice:<id>` in its
+decision: `chain` leads from what a behaviour did back to the message.
+
 ## 8. A refused or failed action
 
 `decisions` shows a refused action with its reason, and `chain` on its `event_id`
