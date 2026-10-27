@@ -49,7 +49,7 @@ over SSH: the fallback at the end.
 | Tool | Does |
 |---|---|
 | `package_list` | installed packages (origin, changed or not) and the starter set |
-| `package_install` | a starter package missing from the folder (from a git URL: not yet) |
+| `package_install` | a starter package missing from the folder, or an installed one upgraded to the add-on's version (`upstream` in `package_list`; one the house changed only with `replace_modified`, after showing the owner what it loses) |
 | `package_scaffold` | a new package: manifest with roles, code, a passing spec, README, example |
 | `file_read` | a working-set file, or the list of them |
 | `file_write` | one working-set file, whole (`heuristics.json`, `allowlist.json`, `tiles.json`, `energy.json`, `voice.json`, `heuristics/**`, `packages/**`) |

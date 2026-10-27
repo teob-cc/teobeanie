@@ -11,7 +11,7 @@ import { createHeuristicHost, type InstanceConfig } from "../src/kernel/host.js"
 import { validateParams } from "../src/kernel/params.js";
 import { entityPaths, manifestProblems, resolveRole, satisfies, SDK_VERSION, type RoleShape } from "../src/packages/manifest.js";
 import { installStarter, loadLibrary, STARTER_DIR, starterPackages } from "../src/packages/library.js";
-import { LOCK_FILE, packageHash, readLock } from "../src/packages/lock.js";
+import { LOCK_FILE, lockText, packageHash, readLock } from "../src/packages/lock.js";
 import { readConfig } from "../src/reload.js";
 
 const noLog = (): void => {};
@@ -206,6 +206,18 @@ describe("the loader", () => {
 describe("installing the starter set", () => {
   const instances = (dir: string, ids: string[]) =>
     writeFileSync(join(dir, "heuristics.json"), JSON.stringify({ instances: ids.map((h, i) => ({ heuristic: h, id: `i${i}`, params: {} })) }));
+
+  it("an installed package whose files are exactly the add-on's version is that version: not modified, no upstream", () => {
+    const dir = tmp();
+    installStarter(dir);
+    // Installed from an older starter version (the lock has its hash), then its files brought to the add-on's by hand.
+    const lockPath = join(dir, LOCK_FILE);
+    const lock = readLock(dir);
+    lock.packages["hold"] = { origin: "starter", version: "0.9.0", hash: "sha256-older" };
+    writeFileSync(lockPath, lockText(lock));
+    installStarter(dir);
+    expect(readLock(dir).packages["hold"]).toEqual({ origin: "starter", version: "1.0.0", hash: packageHash(join(STARTER_DIR, "hold")) });
+  });
 
   it("a fresh folder gets every starter package, locked with origin, version and hash", async () => {
     const dir = tmp();

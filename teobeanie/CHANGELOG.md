@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — upgrading a package
+
+- **`package_install` upgrades.** An installed starter package the add-on ships a newer
+  version of (`upstream` in `package_list`) is replaced with it in one revision, the lock
+  updated. One the house changed is replaced only with `replace_modified`.
+- **A package whose files are exactly the add-on's version is that version**, however the
+  files got there: no longer "modified", and the lock records it.
+
 ## 0.8.1 — switching the heating off by voice
 
 - **climate-guard 1.2.0: `/warm <room> stop`** switches the room's heating off now, and

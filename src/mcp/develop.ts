@@ -487,8 +487,11 @@ export function createDevelopTools(deps: DevelopToolDeps): AnnotatedTool[] {
     annotate(
       tool(
         "package_install",
-        "Install a starter package that is missing from the config folder (package_list says which): its files are copied in and the lock records it. One revision. Installing from a git URL is not built yet.",
-        { name: { type: "string", description: "a starter package's name, e.g. sensor-light" } },
+        "Install a starter package that is missing from the config folder (package_list says which), or upgrade an installed one to the add-on's version (package_list's upstream): its files are copied in and the lock records it. An installed package the house changed (modified) is replaced only with replace_modified, after you have shown the owner what is lost (file_read). One revision. Installing from a git URL is not built yet.",
+        {
+          name: { type: "string", description: "a starter package's name, e.g. sensor-light" },
+          replace_modified: { type: "boolean", description: "upgrade a package the house changed, losing its changes (the revision keeps them for a rollback)" },
+        },
         async (a) => {
           const name = str(a, "name");
           if (name === undefined) throw new Error("name is required");
@@ -496,26 +499,45 @@ export function createDevelopTools(deps: DevelopToolDeps): AnnotatedTool[] {
           const starter = deps.starter().find((s) => s.name === name);
           if (starter === undefined) throw new Error(`no starter package ${name}: package_list names them`);
           const target = join(deps.configDir, PACKAGES, name);
-          if (existsSync(target)) throw new Error(`${name} is already in the config folder`);
           const lockPath = join(deps.configDir, LOCK_FILE);
+          // An installed one: an upgrade, when the add-on ships another version.
+          let from: string | undefined;
+          if (existsSync(target)) {
+            const hash = packageHash(target);
+            if (hash === starter.hash) throw new Error(`${name} is already the add-on's version ${starter.manifest.version}`);
+            const entry = readLock(deps.configDir).packages[name];
+            const modified = entry === undefined || entry.origin !== "starter" || hash !== entry.hash;
+            if (modified && a["replace_modified"] !== true) {
+              throw new Error(`${name} was changed by the house (or is not the starter's): upgrading loses those changes. Show the owner what differs (file_read), then pass replace_modified: true`);
+            }
+            from = entry?.version ?? "?";
+          }
+          // The files an upgrade replaces, kept outside the packages until the reload has taken the new ones.
+          const aside = from !== undefined ? join(mkdtempSync(join(tmpdir(), "teob-upgrade-")), name) : undefined;
           const o = await deps.reloader.write({
             by: by(),
-            summary: `install package ${name} ${starter.manifest.version} from the starter set`,
+            summary: from === undefined ? `install package ${name} ${starter.manifest.version} from the starter set` : `upgrade package ${name} ${from} → ${starter.manifest.version} from the starter set`,
             apply: () => {
               const oldLock = existsSync(lockPath) ? readFileSync(lockPath) : undefined;
               const lock = readLock(deps.configDir);
+              if (aside !== undefined) {
+                cpSync(target, aside, { recursive: true });
+                rmSync(target, { recursive: true, force: true });
+              }
               mkdirSync(join(deps.configDir, PACKAGES), { recursive: true });
               cpSync(starter.dir, target, { recursive: true, filter: (src) => !/[\\/](\.[^\\/]+|node_modules)$/.test(src) });
               lock.packages[name] = { origin: "starter", version: starter.manifest.version, hash: packageHash(target) };
               writeFileSync(lockPath, lockText(lock));
               return () => {
                 rmSync(target, { recursive: true, force: true });
+                if (aside !== undefined) cpSync(aside, target, { recursive: true });
                 if (oldLock === undefined) unlinkSync(lockPath);
                 else writeFileSync(lockPath, oldLock);
               };
             },
           });
-          return applied(o, { package: name, version: starter.manifest.version });
+          if (aside !== undefined) rmSync(dirname(aside), { recursive: true, force: true });
+          return applied(o, { package: name, version: starter.manifest.version, ...(from !== undefined ? { upgraded_from: from } : {}) });
         },
       ),
       "write",

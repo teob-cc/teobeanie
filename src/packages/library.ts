@@ -140,6 +140,8 @@ function provenance(name: string, hash: string, lock: Lock, starters: StarterPac
   const entry: LockEntry | undefined = lock.packages[name];
   const starter = starters.find((s) => s.name === name);
   const origin = entry?.origin ?? (starter !== undefined ? "starter" : "local");
+  // Files that are exactly the add-on's version are that version, however they got there.
+  if (origin === "starter" && starter !== undefined && hash === starter.hash) return { origin, modified: false };
   const baseline = entry?.hash ?? starter?.hash;
   const modified = origin !== "local" && baseline !== undefined && hash !== baseline;
   const upstream = origin === "starter" && starter !== undefined && starter.hash !== baseline ? { version: starter.manifest.version, hash: starter.hash } : undefined;
@@ -310,6 +312,8 @@ export function installStarter(configDir: string, opts: { starterDir?: string; l
     }
     const next: LockEntry = entry !== undefined ? { ...entry, version } : { origin: "starter", version, hash: s.hash };
     delete next.removed;
+    // Files that are exactly the add-on's version (written by hand, or an upgrade) are that version.
+    if (next.origin === "starter" && hash === s.hash) next.hash = s.hash;
     next.modified = next.origin !== "local" && hash !== next.hash;
     if (!next.modified) delete next.modified;
     if (next.origin === "starter" && s.hash !== next.hash) next.upstream = { version: s.manifest.version, hash: s.hash };

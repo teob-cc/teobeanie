@@ -5,7 +5,7 @@
 // package_export refusing a house id; the annotations on both doors and the revision in
 // the tool-call journal.
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -16,6 +16,7 @@ import { liveScope, type HouseScope } from "../src/allowlist.js";
 import { createSafeActuator } from "../src/kernel/actuator.js";
 import { createHeuristicHost, loadInstances } from "../src/kernel/host.js";
 import { loadLibrary, STARTER_DIR, starterPackages } from "../src/packages/library.js";
+import { packageHash } from "../src/packages/lock.js";
 import { createPauseControl, pauseAggregate, pauseEventCodec, pauseStateCodec } from "../src/pause.js";
 import { applyConfig, createReloader, type ConfigFiles } from "../src/reload.js";
 import { createRevisionStore, recordBootRevision, workingSetPaths } from "../src/revisions.js";
@@ -210,6 +211,34 @@ describe("develop tools: one revision each, by mcp:<caller>", () => {
     // Nothing changed: no revision.
     const same = await h.call("file_write", { path: "packages/relay-pulse/README.md", content: "# Momentary relay\n\nChanged.\n" });
     expect(same.out["unchanged"]).toBe(true);
+  });
+
+  it("package_install upgrades an installed starter package to the add-on's version; one the house changed only with replace_modified", async () => {
+    const h = await house();
+    expect((await h.call("package_install", { name: "hold" })).error).toBeUndefined();
+    expect((await h.call("package_install", { name: "hold" })).error).toMatch(/already the add-on's version/);
+    // An older version, as the lock recorded it when it was installed.
+    const dir = join(h.config, "packages", "hold");
+    const old = h.read("packages/hold/README.md");
+    await h.call("file_write", { path: "packages/hold/README.md", content: "# Hold\n\nAn older version.\n" });
+    const lockPath = join(h.config, "teobeanie.lock.json");
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    lock.packages.hold = { origin: "starter", version: "0.9.0", hash: packageHash(dir) };
+    writeFileSync(lockPath, JSON.stringify(lock, null, 2));
+    const before = h.revisions();
+    const up = await h.call("package_install", { name: "hold" });
+    expect(up.error).toBeUndefined();
+    expect(up.out["upgraded_from"]).toBe("0.9.0");
+    expect(h.revisions()).toBe(before + 1);
+    expect(h.read("packages/hold/README.md")).toBe(old);
+    expect(JSON.parse(readFileSync(lockPath, "utf8")).packages.hold).toMatchObject({ origin: "starter", hash: packageHash(dir) });
+    // Changed by the house: refused, then replaced on request.
+    await h.call("file_write", { path: "packages/hold/README.md", content: "# Hold\n\nOurs.\n" });
+    expect((await h.call("package_install", { name: "hold" })).error).toMatch(/replace_modified: true/);
+    expect((await h.call("package_install", { name: "hold", replace_modified: true })).error).toBeUndefined();
+    expect(h.read("packages/hold/README.md")).toBe(old);
+    // Nothing is left beside the packages.
+    expect(readdirSync(join(h.config, "packages")).filter((d) => d.startsWith("hold"))).toEqual(["hold"]);
   });
 
   it("a change the reload rejects leaves the folder as it was, and no revision", async () => {
