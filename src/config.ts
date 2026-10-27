@@ -9,6 +9,8 @@ export interface AddonOptions {
   openrouter_model: string;
   ollama_url: string;
   llm_monthly_budget_usd: number;
+  /** Speech to text for voice messages (an OpenAI-compatible transcription server); empty: the Teobeanie Whisper add-on. */
+  stt_url: string;
   telegram_bot_token: string;
   telegram_chat_id: string;
   /** A second chat for watching the house: notices of instances marked "alerts" go there too. */
@@ -51,6 +53,7 @@ const DEFAULT_OPTIONS: AddonOptions = {
   openrouter_model: "anthropic/claude-sonnet-4.5",
   ollama_url: "",
   llm_monthly_budget_usd: 10,
+  stt_url: "",
   telegram_bot_token: "",
   telegram_chat_id: "",
   telegram_alerts_chat_id: "",

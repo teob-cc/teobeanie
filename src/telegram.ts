@@ -8,12 +8,17 @@
 // sent without one, or with one nobody answers for, gets a keyboard of the arguments
 // instead: a press runs the command as the person who pressed it.
 //
+// Voice messages from the chat go to the voice lane (src/voice/lane.ts) when voice.json
+// switches it on; the bot then needs to see every message of the group (an admin, or
+// privacy mode off), not only commands.
+//
 // A bot has one update stream: only one client may poll it. This runs only when the
 // add-on option telegram_commands is on, at the cut-over from another bot client
 // (Node-RED). Until then Teobeanie sends through the same bot without reading it.
 
 import type { CommandSource } from "./kernel/heuristic.js";
 import type { CommandKeyboard, MenuCommand } from "./kernel/host.js";
+import type { VoiceIo, VoiceMessage } from "./voice/lane.js";
 
 export interface TelegramReceiverOptions {
   token: string;
@@ -29,6 +34,8 @@ export interface TelegramReceiverOptions {
   keyboard?: (name: string) => CommandKeyboard | undefined;
   /** A reply Teobeanie itself sends (unknown or stale commands), not an instance's. */
   reply: (text: string) => Promise<void>;
+  /** The voice lane: voice messages of the configured chats, while it is on. */
+  voice?: { enabled(): boolean; take(msg: VoiceMessage, io: VoiceIo): Promise<void> };
   /** Commands older than this are not run: a backlog after downtime (default 120 s). */
   maxAgeSec?: number;
   /** Long-poll timeout (default 50 s). */
@@ -44,7 +51,7 @@ export interface TelegramReceiver {
   stop(): void;
   /** Set the bot's menu again if the commands changed (after a reload). */
   refreshMenu(): void;
-  stats(): { polling: boolean; updates: number; commands: number; lastError?: string };
+  stats(): { polling: boolean; updates: number; commands: number; voices: number; lastError?: string };
 }
 
 interface Chat {
@@ -61,8 +68,11 @@ interface User {
 interface Update {
   update_id: number;
   message?: {
+    message_id: number;
     date: number;
     text?: string;
+    /** A voice message (OGG/Opus). */
+    voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
     chat: Chat;
     from?: User;
     /** The group became a supergroup, with a new id. */
@@ -98,6 +108,7 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
   let abort: AbortController | undefined;
   let updates = 0;
   let commands = 0;
+  let voices = 0;
   let lastError: string | undefined;
   let conflictLogged = false;
   /** Chats the bot is in that are not configured, said once each (how to find a new chat's id). */
@@ -109,14 +120,24 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
     o.log("info", `telegram: ${how} chat ${id}${chat.title ? ` "${chat.title}"` : ""}, which is not a configured chat`);
   };
 
-  /** A Bot API call; errors name the method, never the URL (it holds the token). */
-  const api = async (method: string, body: object): Promise<void> => {
+  /** A Bot API call and its result; errors name the method, never the URL (it holds the token). */
+  const api = async (method: string, body: object): Promise<unknown> => {
     const res = await f(`https://api.telegram.org/bot${o.token}/${method}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`${method} ${res.status}: ${await res.text()}`);
+    return ((await res.json().catch(() => ({}))) as { result?: unknown }).result;
+  };
+
+  /** A file the chat holds (a voice message), by its id: getFile, then the download. */
+  const download = async (fileId: string): Promise<Uint8Array> => {
+    const file = (await api("getFile", { file_id: fileId })) as { file_path?: string } | undefined;
+    if (!file?.file_path) throw new Error("getFile: no file_path");
+    const res = await f(`https://api.telegram.org/file/bot${o.token}/${file.file_path}`);
+    if (!res.ok) throw new Error(`file download ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
   };
   const chatRef = (id: string): number | string => (/^-?\d+$/.test(id) ? Number(id) : id);
   const source = (u: User | undefined): CommandSource => ({ channel: "telegram", ...(u ? { user: u.username ?? u.first_name ?? String(u.id) } : {}) });
@@ -229,6 +250,7 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
       return;
     }
     const cmd = parseCommand(msg.text);
+    if (msg.voice !== undefined && allowed.has(String(msg.chat.id)) && o.voice?.enabled()) return voice(msg as VoiceUpdate);
     if (!allowed.has(String(msg.chat.id))) {
       if (cmd !== undefined) o.log("warn", `telegram: /${cmd.name} from chat ${msg.chat.id} ignored (not a configured chat)`);
       else unknownChat(msg.chat, "a message in");
@@ -242,6 +264,32 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
       return;
     }
     await run(cmd, source(msg.from), msg.chat.id, "from");
+  }
+
+  type VoiceUpdate = NonNullable<Update["message"]> & { voice: NonNullable<NonNullable<Update["message"]>["voice"]> };
+
+  /** A voice message to the voice lane, not awaited: hearing it takes seconds, the commands go on meanwhile. */
+  function voice(msg: VoiceUpdate): void {
+    const sent = msg.date * 1000;
+    const by = msg.from?.username ?? msg.from?.first_name ?? String(msg.from?.id ?? "?");
+    if (now() - sent > maxAgeMs) {
+      o.log("warn", `telegram: a voice message from ${by} sent ${Math.round((now() - sent) / 1000)} s ago, not heard`);
+      return;
+    }
+    voices++;
+    const chat = msg.chat.id;
+    void o.voice!.take(
+      { chat: String(chat), messageId: msg.message_id, by, seconds: msg.voice.duration, at: sent },
+      {
+        download: () => download(msg.voice.file_id),
+        reply: async (text) => {
+          await api("sendMessage", { chat_id: chat, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
+        },
+        react: async (emoji) => {
+          await api("setMessageReaction", { chat_id: chat, message_id: msg.message_id, reaction: [{ type: "emoji", emoji }] });
+        },
+      },
+    );
   }
 
   async function loop(): Promise<void> {
@@ -301,6 +349,6 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
       running = false;
       abort?.abort();
     },
-    stats: () => ({ polling: running, updates, commands, ...(lastError !== undefined ? { lastError } : {}) }),
+    stats: () => ({ polling: running, updates, commands, voices, ...(lastError !== undefined ? { lastError } : {}) }),
   };
 }

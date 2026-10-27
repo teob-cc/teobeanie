@@ -21,6 +21,8 @@ import { loadHouseConfig, type TileSpec } from "./tiles.js";
 import type { InfraConfig } from "./infra/service.js";
 import { loadEnergyFile } from "./energy/file.js";
 import type { EnergyFile } from "./energy/config.js";
+import { loadVoiceFile } from "./voice/file.js";
+import type { VoiceFile } from "./voice/file.js";
 import type { GroupsConfig } from "./house/layout.js";
 import { loadInstances, type HeuristicHost, type InstanceConfig, type InstanceInfo, type PreparedReload, type ReloadChanges } from "./kernel/host.js";
 import { loadLibrary, type HeuristicSource, type PackageInfo } from "./packages/library.js";
@@ -33,7 +35,7 @@ import { LOCK_FILE } from "./packages/lock.js";
 import { inWorkingSet, type RevisionStore } from "./revisions.js";
 
 /** The config files the panel edits as text. */
-export const CONFIG_FILES = ["heuristics.json", "allowlist.json", "tiles.json", "energy.json"];
+export const CONFIG_FILES = ["heuristics.json", "allowlist.json", "tiles.json", "energy.json", "voice.json"];
 
 /** The top-level files whose digest says whether a reload changed a file (with heuristics/ and packages/). */
 const FINGERPRINT_FILES = [...CONFIG_FILES, LOCK_FILE];
@@ -49,6 +51,8 @@ export interface ConfigFiles {
   infra: InfraConfig;
   /** energy.json: the energy ledger's tariffs and additions (the defaults without one). */
   energy: EnergyFile;
+  /** voice.json: the voice lane (off without one). */
+  voice: VoiceFile;
   /** The packages' heuristics and the house's own files'. */
   library: AnyHeuristic[];
   /** The packages they came from. */
@@ -69,12 +73,13 @@ export async function readConfig(configDir: string, log: Log, extra: AnyHeuristi
   const allowlist = loadAllowlist(configDir, log);
   const { tiles, groups, infra } = loadHouseConfig(configDir, log);
   const energy = loadEnergyFile(configDir);
+  const voice = loadVoiceFile(configDir);
   const failures: string[] = [];
   const teobLog = (level: string, msg: string): void => log(level === "warn" ? "warning" : level, msg);
   const lib = await loadLibrary(configDir, teobLog, failures, { taken: extra });
   if (failures.length > 0) throw new Error(failures.join("; "));
   const instances = loadInstances(configDir, teobLog);
-  return { allowlist, tiles, groups, infra, energy, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
+  return { allowlist, tiles, groups, infra, energy, voice, library: [...extra, ...lib.heuristics], packages: lib.packages, sources: lib.sources, facts: lib.facts, factSources: lib.factSources, instances };
 }
 
 /**

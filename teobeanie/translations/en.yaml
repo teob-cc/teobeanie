@@ -14,6 +14,9 @@ configuration:
   llm_monthly_budget_usd:
     name: LLM monthly budget (USD)
     description: Hard spend cap enforced by the spend guard; LLM calls stop when reached.
+  stt_url:
+    name: Speech to text URL
+    description: Optional. For voice messages (voice.json), an OpenAI-compatible transcription server; empty uses the Teobeanie Whisper add-on from this repository.
   telegram_bot_token:
     name: Telegram bot token
     description: Optional. Enables notifications via a Telegram bot.

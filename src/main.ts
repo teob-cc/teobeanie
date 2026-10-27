@@ -53,6 +53,11 @@ import { startAgentServer, startServer, type HealthReport } from "./server.js";
 import { installStarter, loadLibrary, starterPackages, type PackageInfo } from "./packages/library.js";
 import { createSafeActuator, createTelegramNotifier } from "./kernel/actuator.js";
 import { createTelegramReceiver } from "./telegram.js";
+import { loadVoiceFile, NO_VOICE, type VoiceFile } from "./voice/file.js";
+import { monthStart, VOICE_ENTITY, voiceAggregate, voiceEventCodec, voiceSpend, voiceStateCodec, VOICE_CATEGORY, type VoiceCommand } from "./voice/journal.js";
+import { createVoiceLane } from "./voice/lane.js";
+import { createChatClient, OPENROUTER_URL, type ChatClient } from "./voice/llm.js";
+import { createTranscriber, siblingWhisperUrl } from "./voice/stt.js";
 import { createHeuristicHost, loadInstances, seedConfigExamples } from "./kernel/host.js";
 import { createDeviceResolver } from "./devices.js";
 import { createMonitor, type Monitor } from "./monitor.js";
@@ -118,6 +123,13 @@ try {
   energyFile = loadEnergyFile(config.configDir);
 } catch (err) {
   log("error", `energy: ${String(err)} (the ledger runs without energy.json until it is fixed)`);
+}
+// voice.json: the voice lane. One that will not do leaves voice off until it is fixed.
+let voiceFile: VoiceFile = NO_VOICE;
+try {
+  voiceFile = loadVoiceFile(config.configDir);
+} catch (err) {
+  log("error", `voice: ${String(err)} (voice is off until it is fixed)`);
 }
 checkTileCoverage(tiles, allowlist.routes.map((r) => r.entityId), log);
 const scope = liveScope(() => allowlist.scope);
@@ -223,6 +235,7 @@ const { runtime, journal } = createSqliteRuntime({ path: journalPath, onPersiste
   registration(accessAggregate, accessEventCodec, accessStateCodec),
   registration(moveAggregate, moveEventCodec, moveStateCodec),
   registration(energyAggregate, energyEventCodec, energyStateCodec),
+  registration(voiceAggregate, voiceEventCodec, voiceStateCodec),
 ]);
 // The global pause, folded from the journal before any instance can act (a recovered
 // notice is resent through the actuator too).
@@ -402,6 +415,63 @@ ha.onStatesSnapshot((snap) => {
 });
 ha.start();
 
+// 9a. Voice messages: heard by Teobeanie Whisper (or stt_url), understood by the model
+// into the commands voice.json lists, run through the command lane as whoever spoke.
+const sttUrl = config.options.stt_url.trim() || (config.mode === "addon" ? siblingWhisperUrl() : "");
+const transcriber = sttUrl ? createTranscriber({ url: sttUrl }) : undefined;
+const llmFor = (() => {
+  const clients = new Map<string, ChatClient>();
+  return (model: string): ChatClient | undefined => {
+    const o = config.options;
+    const name = model.trim() || o.openrouter_model;
+    if (o.llm_provider === "none" || !name) return undefined;
+    if (o.llm_provider === "openrouter" && !o.openrouter_api_key) return undefined;
+    if (o.llm_provider === "ollama" && !o.ollama_url) return undefined;
+    let c = clients.get(name);
+    if (c === undefined) {
+      c =
+        o.llm_provider === "openrouter"
+          ? createChatClient({ baseUrl: OPENROUTER_URL, apiKey: o.openrouter_api_key, model: name, openrouter: true })
+          : createChatClient({ baseUrl: `${o.ollama_url.replace(/\/+$/, "")}/v1`, model: name });
+      clients.set(name, c);
+    }
+    return c;
+  };
+})();
+const voiceCategory = categoryTypes<VoiceCommand, void>(VOICE_CATEGORY);
+/** The month's model spend: folded from the journal at the start, then added to as messages are journaled. */
+const voiceMonth = { start: monthStart(Date.now()), spent: 0 };
+voiceMonth.spent = voiceSpend(journal, voiceMonth.start);
+const houseTimeFormat = (): Intl.DateTimeFormat =>
+  new Intl.DateTimeFormat("en-GB", { timeZone: houseZone(houseFacts), weekday: "long", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+const voiceLane = createVoiceLane({
+  file: () => voiceFile,
+  transcriber,
+  llm: llmFor,
+  schemas: () => heuristics.commandSchemas(),
+  context: (commands) => {
+    const answering = new Set(heuristics.instances().filter((i) => i.mode !== "off" && i.commands.some((c) => commands.includes(c))).map((i) => i.key));
+    return heuristics
+      .cards()
+      .filter((c) => answering.has(c.key) && c.card !== undefined)
+      .map((c) => `${c.card!.title}: ${c.card!.fields.map((f) => `${f.label} ${f.value === null ? "—" : String(f.value)}${f.unit ?? ""}`).join("; ")}`);
+  },
+  dispatch: (name, args, from) => heuristics.command(name, args, from),
+  houseTime: (at) => houseTimeFormat().format(at),
+  spent: () => {
+    const start = monthStart(Date.now());
+    if (start !== voiceMonth.start) Object.assign(voiceMonth, { start, spent: 0 });
+    return voiceMonth.spent;
+  },
+  budgetUsd: config.options.llm_monthly_budget_usd,
+  record: (event) => {
+    voiceMonth.spent += event.usage?.cost ?? 0;
+    void runtime.tell(VOICE_ENTITY, { tag: "Record", event }, voiceCategory).catch((err) => log("error", `voice journal: ${String(err)}`));
+  },
+  log: haLog,
+});
+if (voiceFile.mode !== "off") log("info", `voice: ${voiceFile.mode}, commands ${voiceFile.commands.map((c) => "/" + c).join(", ") || "none"}; speech to text ${sttUrl || "none"}`);
+
 // 9a. Telegram commands, once Teobeanie is the bot's only client (telegram_commands).
 const telegram =
   config.options.telegram_commands && notifier !== undefined && tgToken
@@ -413,6 +483,7 @@ const telegram =
         menu: () => heuristics.commandMenu(),
         keyboard: (name) => heuristics.commandKeyboard(name),
         reply: (text) => notifier.send(text),
+        voice: voiceLane,
         log: haLog,
       })
     : undefined;
@@ -504,6 +575,8 @@ const reloader = createReloader({
         infra.configure(next.infra);
         house.configure(houseConfig());
         energy.configure(next.energy);
+        if (JSON.stringify(next.voice) !== JSON.stringify(voiceFile)) log("info", `voice: ${next.voice.mode}, commands ${next.voice.commands.map((c) => "/" + c).join(", ") || "none"}`);
+        voiceFile = next.voice;
         attributeWatched = new Set(prepared.attributeWatched);
         const nextRoutes = routesFor(allowlist, prepared.watchedEntities);
         if (JSON.stringify(nextRoutes) !== JSON.stringify(routes) || prev.policyVersion !== allowlist.policyVersion) {

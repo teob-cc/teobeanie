@@ -110,7 +110,7 @@ export function writablePath(path: string): string {
   if (p === LOCK_FILE) throw new Error(`${LOCK_FILE} is written by the add-on (package_install), never by hand`);
   if (GENERATED.some((g) => p === g || p.startsWith(`${g}/`))) throw new Error(`${p} is generated: the types tool writes it`);
   if (!CONFIG_FILES.includes(p) && !p.startsWith("heuristics/") && !p.startsWith(`${PACKAGES}/`)) {
-    throw new Error(`${p} is outside the working set: heuristics.json, allowlist.json, tiles.json, heuristics/** and packages/** only`);
+    throw new Error(`${p} is outside the working set: heuristics.json, allowlist.json, tiles.json, energy.json, voice.json, heuristics/** and packages/** only`);
   }
   if (!inWorkingSet(p)) throw new Error(`${p}: dot files and node_modules are not part of the working set`);
   return p;
@@ -553,7 +553,7 @@ export function createDevelopTools(deps: DevelopToolDeps): AnnotatedTool[] {
     annotate(
       tool(
         "file_read",
-        "A file of the working set (heuristics.json, allowlist.json, tiles.json, teobeanie.lock.json, heuristics/**, packages/**), as text. Without a path, lists the working set's files. Read-only.",
+        "A file of the working set (heuristics.json, allowlist.json, tiles.json, energy.json, voice.json, teobeanie.lock.json, heuristics/**, packages/**), as text. Without a path, lists the working set's files. Read-only.",
         { path: { type: "string", description: "relative to the config folder, e.g. packages/sensor-light/sensor-light.ts" } },
         (a) => {
           const path = str(a, "path");
@@ -571,7 +571,7 @@ export function createDevelopTools(deps: DevelopToolDeps): AnnotatedTool[] {
     annotate(
       tool(
         "file_write",
-        "Write one file of the working set (heuristics.json, allowlist.json, tiles.json, heuristics/**, packages/**; not the lock or generated files) with the whole new text. A JSON file must parse. Applied through the reload, all or nothing: rejected, the folder stays as it was and the reason comes back. One revision. Instances: instance_upsert keeps the file's layout; scope: scope_add.",
+        "Write one file of the working set (heuristics.json, allowlist.json, tiles.json, energy.json, voice.json, heuristics/**, packages/**; not the lock or generated files) with the whole new text. A JSON file must parse. Applied through the reload, all or nothing: rejected, the folder stays as it was and the reason comes back. One revision. Instances: instance_upsert keeps the file's layout; scope: scope_add.",
         { path: { type: "string" }, content: { type: "string", description: "the whole file" } },
         async (a) => {
           const p = writablePath(str(a, "path") ?? "");

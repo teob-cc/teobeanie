@@ -27,7 +27,7 @@ import { mayWrite } from "./studio/files.js";
 import { CONFIG_CATEGORY, CONFIG_ENTITY, type ConfigChange, type ConfigChanged } from "./working-set.js";
 
 /** The working set's top-level files; heuristics/ and packages/ are taken whole. */
-export const SNAPSHOT_FILES = ["heuristics.json", "allowlist.json", "tiles.json", "energy.json", LOCK_FILE];
+export const SNAPSHOT_FILES = ["heuristics.json", "allowlist.json", "tiles.json", "energy.json", "voice.json", LOCK_FILE];
 export const SNAPSHOT_DIRS = ["heuristics", "packages"];
 
 /** Path → "sha256-<hex>" of its bytes. */
