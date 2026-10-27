@@ -112,7 +112,18 @@ export type CommandArgSpec =
   /** One of a few words: a room, home or away. Instances sharing the command merge their choices. */
   | { name: string; kind: "choice"; choices: string[]; doc?: string; optional?: boolean }
   /** A number, sent as written ("21.5"); min and max are what the instance accepts. */
-  | { name: string; kind: "number"; min?: number; max?: number; step?: number; unit?: string; doc?: string; optional?: boolean }
+  | {
+      name: string;
+      kind: "number";
+      min?: number;
+      max?: number;
+      step?: number;
+      unit?: string;
+      /** Words the argument may be instead of a number: "off" ends what the number started. */
+      or?: string[];
+      doc?: string;
+      optional?: boolean;
+    }
   /** A duration, sent as "2h" or "90m" (parseDuration); absent: defaultMin. */
   | { name: string; kind: "duration"; maxMin?: number; defaultMin?: number; doc?: string; optional?: boolean };
 
