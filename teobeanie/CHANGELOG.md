@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — voice messages, heating wishes, the house's bounds
+## 0.8.0 — voice messages, heating wishes, the house's bounds
 
 - **Voice messages in the chat.** Say what you want instead of typing a command. The
   message is heard on the Home Assistant host by the new **Teobeanie Whisper** add-on
