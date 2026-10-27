@@ -1,10 +1,10 @@
 // actuator.ts — the single actuation choke point. Every action a heuristic decides
 // passes vet() (inside the decision, so the verdict is journaled with it) and, in
 // active mode only, execute(). Bounds and ownership are code, not configuration a
-// heuristic can widen.
+// heuristic can widen; the house may narrow them (allowlist.json "bounds").
 
 import type { OwnCalls } from "../attribution.js";
-import type { Action, Json } from "./heuristic.js";
+import type { Action, HouseBound, Json } from "./heuristic.js";
 
 export type Mode = "off" | "shadow" | "active";
 
@@ -17,14 +17,8 @@ export interface ActionOutcome {
   haContextId?: string;
 }
 
-export interface Bound {
-  /** Entity id prefix this bound applies to, e.g. "climate.". */
-  entityPrefix: string;
-  /** Service data field, e.g. "temperature". */
-  field: string;
-  min: number;
-  max: number;
-}
+/** A service data field's range for the entities with an id prefix ("climate.", "temperature"). */
+export type Bound = HouseBound;
 
 export const DEFAULT_BOUNDS: Bound[] = [
   { entityPrefix: "climate.", field: "temperature", min: 15, max: 27 },
@@ -86,6 +80,12 @@ export function createSafeActuator(deps: {
   ha: CallGatewayLike;
   notifier?: Notifier;
   policy?: ActuatorPolicy;
+  /**
+   * The bounds as they stand now: the code's, then the house's (allowlist.json), read at
+   * every vet so a reload applies. Every matching bound must pass. Default: policy.bounds,
+   * else DEFAULT_BOUNDS.
+   */
+  bounds?: () => readonly Bound[];
   /** The house's operation scope: no call on anything outside it, whoever owns it. */
   scope?: { operates(entityId: string): boolean };
   /** Told of every call before it is sent, so the call_service audit can attribute it to Teobeanie. */
@@ -104,7 +104,7 @@ export function createSafeActuator(deps: {
   const forbidden = new Map<string, string>(); // "entity service" → reason
   /** Instances the pause does not stop. */
   const exempt = new Set<string>();
-  const bounds = deps.policy?.bounds ?? DEFAULT_BOUNDS;
+  const bounds = deps.bounds ?? ((): readonly Bound[] => deps.policy?.bounds ?? DEFAULT_BOUNDS);
   const perEntityPerHour = deps.policy?.callsPerEntityPerHour ?? 30;
   const retryAfterMs = deps.retryAfterMs ?? 5000;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -161,7 +161,7 @@ export function createSafeActuator(deps: {
         }
         const denied = forbidden.get(`${e} ${action.service}`);
         if (denied !== undefined) return { ok: false, reason: denied };
-        for (const b of bounds) {
+        for (const b of bounds()) {
           if (!e.startsWith(b.entityPrefix)) continue;
           const v = action.data?.[b.field];
           if (v === undefined) continue;

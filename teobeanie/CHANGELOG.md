@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — voice messages
+## Unreleased — voice messages, heating wishes, the house's bounds
 
 - **Voice messages in the chat.** Say what you want instead of typing a command. The
   message is heard on the Home Assistant host by the new **Teobeanie Whisper** add-on
@@ -11,10 +11,24 @@
   is journaled with its transcript, the calls, the tokens and the cost, within
   `llm_monthly_budget_usd`. New option `stt_url` for another transcription server.
   [docs/voice.md](../docs/voice.md).
-- **Typed commands.** A heuristic may give its commands' arguments a schema
-  (`commandSchema`: a choice, a number with its range, a duration); voice offers a
-  command only through it. `parseDuration`, `formatDuration` and `boundFor` join the
-  `teobeanie` module.
+- **The house's own bounds.** `allowlist.json` takes `"bounds"`, e.g.
+  `[{ "entityPrefix": "climate.", "field": "temperature", "min": 17, "max": 22 }]`. They
+  come after the SafeActuator's code bounds and every matching bound must pass, so they
+  only narrow (a wider one changes nothing). A reload applies them at the next call.
+  Decisions read them as `ctx.house.bounds` (`boundFor`), the MCP `house_scope` tool lists
+  them, and the simulator vets a spec's calls against `simulate(..., { house: { bounds } })`.
+- **Typed commands.** A heuristic may describe its commands' arguments
+  (`commandSchema(params, house)`: choices, numbers with a range and `or` words, durations
+  read by `parseDuration`); the host merges them over the active instances per command
+  (`commandSchemas()`), which is how voice offers and checks a command. `parseDuration`,
+  `formatDuration` and `boundFor` join the `teobeanie` module.
+- **climate-guard 1.1.0: the wish.** Optional `warm` (`{ "command": "warm", "room": "bedroom" }`):
+  `/warm bedroom 21 2h` heats the room at 21° for 2 h (default 3 h, at most `maxHours`, 12),
+  within the house's bounds, with no longest run; then the unit goes back as it was (off
+  stays off; a heating unit gets the guard's setpoint and a fresh longest run, or the
+  setpoint it had where the guard holds none). Someone switching it off ends it; a wish and
+  a waiver end each other. `"setpoints": {}` makes a guard that only answers wishes, for a
+  boiler's thermostat.
 - **Releasing a new add-on.** `scripts/release.sh` takes a `main` that is ahead of
   `origin/main`, so a change that names a new image reaches `main` only with it.
 

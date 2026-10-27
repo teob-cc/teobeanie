@@ -51,7 +51,7 @@ import { createEnergyJournal, energyAggregate, energyEventCodec, energyStateCode
 import { applyConfig, createReloader, watchConfig } from "./reload.js";
 import { startAgentServer, startServer, type HealthReport } from "./server.js";
 import { installStarter, loadLibrary, starterPackages, type PackageInfo } from "./packages/library.js";
-import { createSafeActuator, createTelegramNotifier } from "./kernel/actuator.js";
+import { createSafeActuator, createTelegramNotifier, DEFAULT_BOUNDS } from "./kernel/actuator.js";
 import { createTelegramReceiver } from "./telegram.js";
 import { loadVoiceFile, NO_VOICE, type VoiceFile } from "./voice/file.js";
 import { monthStart, VOICE_ENTITY, voiceAggregate, voiceEventCodec, voiceSpend, voiceStateCodec, VOICE_CATEGORY, type VoiceCommand } from "./voice/journal.js";
@@ -148,6 +148,9 @@ const houseFacts = {
   get timeZone() {
     return timeZone();
   },
+  get bounds() {
+    return allowlist.house.bounds;
+  },
 } as HouseFacts;
 
 // 2b. HA client (connects at step 9) + SafeActuator + heuristic host. Every entity a
@@ -170,6 +173,8 @@ const ownCalls = createOwnCalls();
 const actuator = createSafeActuator({
   ha,
   scope,
+  // The code's bounds, then the house's (allowlist.json), as of the latest reload.
+  bounds: () => allowlist.house.bounds ?? DEFAULT_BOUNDS,
   ownCalls,
   ...(notifier !== undefined ? { notifier } : {}),
 });

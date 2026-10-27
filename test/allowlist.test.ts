@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadAllowlist } from "../src/allowlist.js";
+import { DEFAULT_BOUNDS } from "../src/kernel/actuator.js";
+import { boundFor } from "../src/kernel/heuristic.js";
 import { loadHouseConfig } from "../src/tiles.js";
 
 const noLog = (): void => {};
@@ -55,6 +57,35 @@ describe("loadAllowlist", () => {
     const dir = dataDir();
     writeAllowlist(dir, JSON.stringify({ entities: [{ id: "light.a", debounce: "on-change" }] }));
     expect(loadAllowlist(dir, noLog).policyVersion).toBe(1);
+  });
+
+  it("bounds: the code's, then the house's, which may only narrow them", () => {
+    const dir = dataDir();
+    const entities = [{ id: "climate.den_unit", operate: true }];
+    writeAllowlist(dir, JSON.stringify({ entities }));
+    expect(loadAllowlist(dir, noLog).house.bounds).toEqual(DEFAULT_BOUNDS);
+    const heat = { entityPrefix: "climate.", field: "temperature", min: 17, max: 22 };
+    writeAllowlist(dir, JSON.stringify({ bounds: [heat], entities }));
+    const bounds = loadAllowlist(dir, noLog).house.bounds!;
+    expect(bounds).toEqual([...DEFAULT_BOUNDS, heat]);
+    expect(boundFor({ bounds }, "climate.den_unit", "temperature")).toEqual({ min: 17, max: 22 });
+    // Wider than the code's: the code's range stands.
+    writeAllowlist(dir, JSON.stringify({ bounds: [{ ...heat, min: 5, max: 35 }], entities }));
+    expect(boundFor(loadAllowlist(dir, noLog).house, "climate.den_unit", "temperature")).toEqual({ min: 15, max: 27 });
+  });
+
+  it("throws on a malformed bound, naming it", () => {
+    const dir = dataDir();
+    const entities = [{ id: "light.a" }];
+    const bad = (bounds: unknown) => {
+      writeAllowlist(dir, JSON.stringify({ bounds, entities }));
+      return () => loadAllowlist(dir, noLog);
+    };
+    expect(bad({})).toThrow(/"bounds" must be an array/);
+    expect(bad([{ field: "temperature", min: 1, max: 2 }])).toThrow(/bounds\[0\] needs an "entityPrefix"/);
+    expect(bad([{ entityPrefix: "climate.", field: "temperature", min: "17", max: 22 }])).toThrow(/bounds\[0\] needs numbers "min" and "max"/);
+    expect(bad([{ entityPrefix: "climate.", field: "temperature", min: 23, max: 22 }])).toThrow(/bounds\[0\]: min 23 is above max 22/);
+    expect(bad([{ entityPrefix: "climate.", field: "temperature", min: 17, max: 22, step: 1 }])).toThrow(/bounds\[0\] has an unknown key "step"/);
   });
 
   it("throws on unparseable JSON", () => {

@@ -11,7 +11,7 @@
 // simulate(nobodyNear, undefined, world) for a fact alone; sim.fact(id) reads one.
 
 import { normalizeState } from "@lambda-house/teob-ts/ha";
-import { OUTDOOR_ATTRIBUTES, commandArgs, outdoorEntities, type Action, type AnyHeuristic, type CommandSource, type HouseFacts, type Observed } from "./heuristic.js";
+import { OUTDOOR_ATTRIBUTES, commandArgs, outdoorEntities, type Action, type AnyHeuristic, type CommandSource, type HouseBound, type HouseFacts, type Observed } from "./heuristic.js";
 import type { Mode, Verdict } from "./actuator.js";
 import { applyEvent, decideStep, type KState, type Stamped } from "./step.js";
 import { createFactEngine, isFact, planFacts, type AnyFact, type FactStep } from "./fact.js";
@@ -80,6 +80,19 @@ const FACTS_ONLY: AnyHeuristic = {
 
 const T0 = Date.UTC(2026, 0, 5, 12, 0, 0); // a Monday, noon UTC
 
+/** A call's data within every bound that matches its entities, as the SafeActuator vets it. */
+function withinBounds(action: Action, bounds: readonly HouseBound[]): Verdict {
+  if (action.kind !== "call") return { ok: true };
+  for (const e of action.entities) {
+    for (const b of bounds) {
+      const v = action.data?.[b.field];
+      if (!e.startsWith(b.entityPrefix) || v === undefined) continue;
+      if (typeof v !== "number" || v < b.min || v > b.max) return { ok: false, reason: `${b.field}=${JSON.stringify(v)} outside ${b.min}–${b.max} for ${e}` };
+    }
+  }
+  return { ok: true };
+}
+
 export const describeAction = (a: Action): string =>
   a.kind === "notify" ? `notify: ${a.text}` : `${a.service} ${a.entities.join(",")}`;
 
@@ -99,7 +112,9 @@ export function simulate<P, S>(
   let seq = 0;
   const newId = (): string => `e${String(++seq).padStart(5, "0")}`;
   const instance = opts.instance ?? "sim";
-  const gate = { mode: opts.mode ?? "active", vet: opts.vet ?? ((): Verdict => ({ ok: true })) };
+  // Without a vet of its own, a call keeps to the house's bounds (opts.house.bounds) as the
+  // SafeActuator would have it; everything else passes.
+  const gate = { mode: opts.mode ?? "active", vet: opts.vet ?? ((action: Action): Verdict => withinBounds(action, opts.house?.bounds ?? [])) };
   const house: HouseFacts = { ...opts.house, ...(opts.timeZone !== undefined ? { timeZone: opts.timeZone } : {}) };
   const outdoor = def.usesOutdoor ? outdoorEntities(house.outdoor) : [];
   const watched = new Set([...def.watch(params), ...outdoor]);

@@ -442,6 +442,25 @@ printer or the cameras, does not exist for Teobeanie:
 `debounce` defaults to `on-change`. Widening the scope is a reviewed change to this
 file, not something a heuristic or an agent can do.
 
+The house may also set its own bounds on service data, for example heating setpoints
+between 17 and 22 °C everywhere:
+
+```json
+{
+  "bounds": [{ "entityPrefix": "climate.", "field": "temperature", "min": 17, "max": 22 }],
+  "entities": []
+}
+```
+
+An `entityPrefix` is the start of an entity id: `climate.` for every climate entity, or
+one entity's full id. The SafeActuator checks a call against the code's bounds (below)
+and then the house's, and every bound that matches must pass, so the house's can only
+narrow the code's: a bound of 5–35 °C still leaves 15–27. A reload applies them at once.
+Decisions read them too, as `ctx.house.bounds` (`boundFor(ctx.house, entity, field)`
+gives the narrowest range), so a command can refuse a setpoint the SafeActuator would
+refuse and say why. The MCP `house_scope` tool lists them, and the simulator vets calls
+against `simulate(..., { house: { bounds } })` when a spec gives no `vet` of its own.
+
 ```json
 { "heuristic": "door-nag", "id": "garage", "mode": "shadow", "alerts": true,
   "params": { "door": "binary_sensor.garage_door_contact", "everyMin": 3,
@@ -464,6 +483,25 @@ garage door"); `"commandHelp": { "garage_open": "Open the shed" }` next to `mode
 the instance's own. Shadow instances still take typed commands (and journal what they
 would do) but are not in the menu, as they never reply. A command with arguments
 (`commandArg`) sent without one gets a keyboard of the arguments.
+
+A heuristic may also type its commands, `commandSchema(params, house)`: per command, a
+line on what it does and its arguments in order, each a `choice` (a few words: a room,
+home or away), a `number` (with `min`, `max`, `step`, a `unit`, and `or`, words it may be
+instead, such as `"off"`) or a `duration` (sent as `2h` or `90m`, read with
+`parseDuration`; `maxMin`, `defaultMin`), any of them `optional`. The climate guard's:
+
+```ts
+{ warm: { doc: "Heat a room to a temperature for a while ...", args: [
+  { name: "room", kind: "choice", choices: ["bedroom"] },
+  { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off"] },
+  { name: "duration", kind: "duration", maxMin: 720, defaultMin: 180, optional: true } ] } }
+```
+
+The host merges the schemas of the active instances that answer to a command (the
+choices add up, the ranges narrow; an instance that describes it otherwise is left out
+and logged): this is all a voice or form front end may offer, and it checks a call
+against it before sending it. The numbers come from the house's bounds, so what a front
+end offers is what the SafeActuator allows.
 
 `"notifyPerHour": 30` next to `mode` and `alerts` (not inside `params`) caps the notices this
 instance may send per hour: a positive whole number, otherwise the instance does not
@@ -818,7 +856,7 @@ standalone mode) forces every active instance to shadow.
   and on every reload, and a call to an unclaimed or foreign entity is refused.
 - **No `toggle`:** only absolute-state services, which are safe to retry.
 - **Bounds:** climate temperature 15–27, light brightness 0–100%, cover position and fan
-  percentage 0–100.
+  percentage 0–100, narrowed further by the house's own bounds in `allowlist.json`.
 - **Hard denies:** a heuristic can declare `forbids`, services that no instance may
   ever call on an entity. `leak-shutoff` forbids reopening its valve.
 - **Rate limits:** per entity per hour (default 30), and notifications per instance per
