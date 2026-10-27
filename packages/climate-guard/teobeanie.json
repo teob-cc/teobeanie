@@ -1,7 +1,7 @@
 {
   "name": "climate-guard",
   "version": "1.1.0",
-  "platform": ">=0.8.0 <1.0.0",
+  "platform": ">=0.2.0 <1.0.0",
   "title": "Climate guard",
   "description": "One air conditioner or heat pump kept within limits: setpoints per mode, a longest run, and starts on cold or heat.",
   "pattern": "hold",
