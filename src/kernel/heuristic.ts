@@ -63,6 +63,8 @@ export type Input =
 export interface CommandSource {
   channel: string;
   user?: string;
+  /** What the command came from, when that is journaled elsewhere: "voice:<id>" (a voice message). */
+  ref?: string;
 }
 
 /** Where the house's outdoor conditions come from (allowlist.json "outdoor"). */
@@ -143,11 +145,10 @@ export function parseDuration(text: string | undefined): number | undefined {
   return m[2] === "m" || m[2] === "min" ? Math.round(n * 60_000) : Math.round(n * 3_600_000);
 }
 
-/** ms → "2h", "90m", "1h30m": what parseDuration reads back. */
+/** ms → "2h" (whole hours) or "90m": what parseDuration reads back. */
 export function formatDuration(ms: number): string {
   const min = Math.round(ms / 60_000);
-  if (min % 60 === 0) return `${min / 60}h`;
-  return min > 60 ? `${Math.floor(min / 60)}h${min % 60}m` : `${min}m`;
+  return min % 60 === 0 ? `${min / 60}h` : `${min}m`;
 }
 
 /** Outdoor conditions now. Undefined where no source gives a value. */
