@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — switching the heating off by voice
+## 0.8.1 — switching the heating off by voice
 
 - **climate-guard 1.2.0: `/warm <room> stop`** switches the room's heating off now, and
   ends a wish or a waiver under way; the unit stays off until someone starts it, or the

@@ -1,5 +1,5 @@
 name: Teobeanie Whisper
-version: "0.8.0"
+version: "0.8.1"
 slug: teobeanie_whisper
 description: Speech to text on the Home Assistant host (faster-whisper), for Teobeanie's voice messages
 url: https://github.com/teob-cc/teobeanie
