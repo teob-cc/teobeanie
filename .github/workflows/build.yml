@@ -2,7 +2,8 @@ name: CI & add-on images
 
 # Every push / PR: typecheck, tests, add-on lint, image build (no push).
 # A v* tag (on a release/v<version> branch, see README "Releasing"): the same, then push
-# ghcr.io/<owner>/{amd64,aarch64}-teobeanie:<version>, check that both pull anonymously, and
+# ghcr.io/<owner>/{amd64,aarch64}-{teobeanie,teobeanie-whisper}:<version> (the two add-ons
+# release together, at one version), check that all pull anonymously, and
 # only then fast-forward main to the tag. main carries a version only once its image exists,
 # because the add-on store reads config.yaml from main.
 # The tag must equal teobeanie/config.yaml's version: the Supervisor pulls exactly that tag.
@@ -45,36 +46,39 @@ jobs:
       - uses: frenck/action-addon-linter@v2
         with:
           path: ./teobeanie
+      - uses: frenck/action-addon-linter@v2
+        with:
+          path: ./whisper
 
   build:
     needs: [test, lint]
     strategy:
       matrix:
-        include:
-          - haarch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - haarch: aarch64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+        addon:
+          # Teobeanie builds with the repository root as context; Teobeanie Whisper with its folder.
+          - { name: teobeanie, folder: teobeanie, context: . }
+          - { name: teobeanie-whisper, folder: whisper, context: whisper }
+        arch:
+          - { haarch: amd64, platform: linux/amd64, runner: ubuntu-latest }
+          - { haarch: aarch64, platform: linux/arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.arch.runner }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Read add-on version
         id: version
-        run: echo "version=$(grep '^version:' teobeanie/config.yaml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(grep '^version:' ${{ matrix.addon.folder }}/config.yaml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Release tag must match the add-on version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           if [ "${GITHUB_REF_NAME#v}" != "${{ steps.version.outputs.version }}" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match config.yaml version ${{ steps.version.outputs.version }}" >&2
+            echo "tag ${GITHUB_REF_NAME} does not match ${{ matrix.addon.folder }}/config.yaml version ${{ steps.version.outputs.version }}" >&2
             exit 1
           fi
 
       - id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.haarch }}-teobeanie" >> "$GITHUB_OUTPUT"
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.arch.haarch }}-${{ matrix.addon.name }}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -89,17 +93,17 @@ jobs:
       - name: Build (and push on release tags)
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: teobeanie/Dockerfile
-          platforms: ${{ matrix.platform }}
+          context: ${{ matrix.addon.context }}
+          file: ${{ matrix.addon.folder }}/Dockerfile
+          platforms: ${{ matrix.arch.platform }}
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           build-args: |
             BUILD_VERSION=${{ steps.version.outputs.version }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
             ${{ steps.image.outputs.name }}:latest
-          cache-from: type=gha,scope=${{ matrix.haarch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.haarch }}
+          cache-from: type=gha,scope=${{ matrix.addon.name }}-${{ matrix.arch.haarch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.addon.name }}-${{ matrix.arch.haarch }}
 
   # The images exist and pull anonymously, as an install pulls them.
   verify:

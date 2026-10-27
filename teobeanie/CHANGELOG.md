@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — voice messages
+
+- **Voice messages in the chat.** Say what you want instead of typing a command. The
+  message is heard on the Home Assistant host by the new **Teobeanie Whisper** add-on
+  (faster-whisper, in this repository), a language model turns it into the commands the
+  house has, and they run as whoever spoke. The model can call only the commands
+  `voice.json` lists, each one checked against what it allows; a message with nothing for
+  the house gets an answer saying so. `voice.json` runs in `shadow` first. Every message
+  is journaled with its transcript, the calls, the tokens and the cost, within
+  `llm_monthly_budget_usd`. New option `stt_url` for another transcription server.
+  [docs/voice.md](../docs/voice.md).
+- **Typed commands.** A heuristic may give its commands' arguments a schema
+  (`commandSchema`: a choice, a number with its range, a duration); voice offers a
+  command only through it. `parseDuration`, `formatDuration` and `boundFor` join the
+  `teobeanie` module.
+- **Releasing a new add-on.** `scripts/release.sh` takes a `main` that is ahead of
+  `origin/main`, so a change that names a new image reaches `main` only with it.
+
 ## 0.7.0 — the Infra tab
 
 - **New panel tab: Infra.** The house's infrastructure as Home Assistant sees it now, with

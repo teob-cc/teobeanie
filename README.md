@@ -108,6 +108,7 @@ the add-on's config folder, never in here.
 - Facts (derived state) ✓
 - Revisions and rollback ✓
 - MCP tools to develop and operate behaviours ✓
+- Voice messages, heard on the host ✓
 - Next:
   - a Home Assistant notify channel
   - the landing page, teob.cc/home
@@ -152,15 +153,18 @@ names, so `main` must only name a version whose image exists. A release therefor
 first and reaches `main` last.
 
 1. Write the changes under `## Unreleased` at the top of `teobeanie/CHANGELOG.md` (or a
-   `## <version>` heading), on `main`, pushed, with CI green.
+   `## <version>` heading), on `main`, pushed, with CI green. A change that names a new
+   image (a new add-on folder) stays on the local `main`, unpushed: it reaches `main` only
+   through the tag, once its image exists.
 2. From a clean, up-to-date `main`, run `scripts/release.sh <version>`. It bumps the
    version in `package.json`, `panel/package.json`, `teobeanie/config.yaml`,
    `SDK_VERSION` in `src/packages/manifest.ts` and `.claude-plugin/plugin.json` (a test
    keeps them equal), dates the changelog section, runs the gates, commits on a branch
    `release/v<version>` and pushes that branch and the tag `v<version>`. It never
    touches `main`. `DRY_RUN=1` stops before the push.
-3. The tag run tests and lints, builds the `amd64` and `aarch64` images and pushes
-   `ghcr.io/teob-cc/{arch}-teobeanie:<version>`, checks that both pull anonymously
+3. The tag run tests and lints, builds the `amd64` and `aarch64` images of both add-ons
+   (Teobeanie and Teobeanie Whisper, one version) and pushes
+   `ghcr.io/teob-cc/{arch}-{teobeanie,teobeanie-whisper}:<version>`, checks that all pull anonymously
    (`scripts/check-images.sh`), and only then fast-forwards `main` to the tag. From that
    moment the store offers the version, and its image is already there.
 4. If a step fails, `main` is unchanged. Delete the tag and the branch

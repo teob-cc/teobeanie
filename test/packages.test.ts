@@ -279,12 +279,14 @@ describe("installing the starter set", () => {
 });
 
 describe("one version", () => {
-  it("package.json, the panel's, the add-on's config.yaml, the plugin and the SDK packages are checked against agree", () => {
+  it("package.json, the panel's, both add-ons' config.yaml, the plugin and the SDK packages are checked against agree", () => {
     const root = join(import.meta.dirname, "..");
     const pkg = (json(join(root, "package.json")) as { version: string }).version;
-    const addon = /^version:\s*"([^"]+)"/m.exec(readFileSync(join(root, "teobeanie", "config.yaml"), "utf8"))?.[1];
+    const addon = (folder: string) => /^version:\s*"([^"]+)"/m.exec(readFileSync(join(root, folder, "config.yaml"), "utf8"))?.[1];
     expect(SDK_VERSION).toBe(pkg);
-    expect(addon).toBe(pkg);
+    expect(addon("teobeanie")).toBe(pkg);
+    // Teobeanie Whisper is released with it, at the same version (one tag builds both).
+    expect(addon("whisper")).toBe(pkg);
     // The Claude Code plugin with the skills is released with the add-on.
     expect((json(join(root, ".claude-plugin", "plugin.json")) as { version: string }).version).toBe(pkg);
     expect((json(join(root, "panel", "package.json")) as { version: string }).version).toBe(pkg);

@@ -464,9 +464,9 @@ const voiceLane = createVoiceLane({
     return voiceMonth.spent;
   },
   budgetUsd: config.options.llm_monthly_budget_usd,
-  record: (event) => {
-    voiceMonth.spent += event.usage?.cost ?? 0;
-    void runtime.tell(VOICE_ENTITY, { tag: "Record", event }, voiceCategory).catch((err) => log("error", `voice journal: ${String(err)}`));
+  record: (handled) => {
+    voiceMonth.spent += handled.usage?.cost ?? 0;
+    void runtime.tell(VOICE_ENTITY, { tag: "Record", event: handled }, voiceCategory).catch((err) => log("error", `voice journal: ${String(err)}`));
   },
   log: haLog,
 });
