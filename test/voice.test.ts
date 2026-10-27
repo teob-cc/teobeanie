@@ -402,3 +402,24 @@ describe("voice_try", () => {
     expect(meets({ say: "", kind: "instruction", calls: ["/pet away"], reply: "25° нельзя." }, "refused")).toBe(false);
   });
 });
+
+describe("voice over the climate guards", () => {
+  it("their merged warm schema gives the model the rooms and the house's bounds, and a voice call checks as /warm takes it", async () => {
+    const { climateGuard } = await import("../packages/climate-guard/climate-guard.ts");
+    const { mergeCommandSchemas } = await import("../src/kernel/command-schema.js");
+    const { DEFAULT_BOUNDS } = await import("../src/kernel/actuator.js");
+    const house = { bounds: [...DEFAULT_BOUNDS, { entityPrefix: "climate.", field: "temperature", min: 17, max: 22 }] };
+    const guard = (room: string, climate: string, setpoints: Record<string, number>) => ({
+      key: `climate-guard/${room}`,
+      schemas: climateGuard.commandSchema!({ climate, setpoints, warm: { command: "warm", room } } as never, house),
+    });
+    const { schemas, problems } = mergeCommandSchemas([guard("hall", "climate.study", {}), guard("den", "climate.den_unit", { heat: 20 })]);
+    expect(problems).toEqual([]);
+    const { surfaces: [s] } = surfacesOf(["warm"], schemas);
+    expect(s!.schema.args[0]).toMatchObject({ kind: "choice", choices: ["den", "hall"] });
+    expect(s!.schema.args[1]).toMatchObject({ kind: "number", min: 17, max: 22, or: ["off"] });
+    expect(check(s!, { room: "hall", temperature: 21, duration: 120 })).toEqual({ ok: true, args: ["hall", "21", "2h"] });
+    expect(check(s!, { room: "hall", temperature: 23 })).toMatchObject({ ok: false, reason: expect.stringContaining("17–22") });
+    expect(check(s!, { room: "den", temperature: "off" })).toEqual({ ok: true, args: ["den", "off"] });
+  });
+});
