@@ -309,6 +309,38 @@ describe("climate-guard wish", () => {
     expect(sim.timers["wish"]).toBeUndefined();
   });
 
+  it("stop switches the heating off now, a wish or not, and it stays off until it is cold", () => {
+    const daikin = (state: string, current: number, temperature = 20) => bed(state, { hvac_modes: ["off", "heat", "cool"], current_temperature: current, temperature });
+    const sim = simulate(climateGuard, warmBedroom, Object.fromEntries([daikin("heat", 20)].map(([e, st, at]) => [e, { state: st, attributes: at }])), at).start();
+    sim.command("warm", ["bedroom", "stop"], { channel: "voice", user: "sam" });
+    expect(replies(sim)).toEqual(["bedroom: heating switched off."]);
+    expect(unitCalls(sim)).toEqual(['climate.set_hvac_mode {"hvac_mode":"off"}']);
+    sim.set(...daikin("off", 20)).advance(hours(4));
+    expect(unitCalls(sim)).toHaveLength(1);
+    sim.command("warm", ["bedroom", "stop"], alex);
+    expect(replies(sim).at(-1)).toBe("bedroom is off already.");
+    // A wish under way ends, and the unit does not go back to heating.
+    sim.command("warm", ["bedroom", "21"], alex);
+    sim.set(...daikin("heat", 19, 21)).advance(minutes(30));
+    sim.command("warm", ["bedroom", "stop"], alex);
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_hvac_mode {"hvac_mode":"off"}');
+    expect(stateOf(sim).wish).toBeUndefined();
+    expect(sim.timers["wish"]).toBeUndefined();
+    sim.set(...daikin("off", 19, 21)).advance(hours(4));
+    expect(unitCalls(sim).filter((c) => c.includes('"heat"'))).toHaveLength(1);
+    // Colder than the guard's start: it heats again, as it would have anyway.
+    sim.set(...daikin("off", 16.5, 21)).advance(minutes(1));
+    expect(unitCalls(sim).slice(-2)).toEqual(["climate.set_hvac_mode {\"hvac_mode\":\"heat\"}", "climate.set_temperature {\"temperature\":20}"]);
+  });
+
+  it("stop on a unit that has no off says so, with the lowest setpoint", () => {
+    const thermostat: ClimateGuardParams = { climate: "climate.study", setpoints: {}, warm: { command: "warm", room: "study" } };
+    const sim = simulate(climateGuard, thermostat, { "climate.study": { state: "heat", attributes: { hvac_modes: ["heat"], current_temperature: 19, temperature: 19 } } }, at).start();
+    sim.command("warm", ["study", "stop"], alex);
+    expect(replies(sim)).toEqual(["study cannot be switched off from here; set it to 17° instead."]);
+    expect(unitCalls(sim)).toEqual([]);
+  });
+
   it("someone switching the unit off ends the wish, and it stays off", () => {
     const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
     sim.command("warm", ["bedroom", "21"], alex);
@@ -347,10 +379,10 @@ describe("climate-guard wish", () => {
     expect(replies(b)).toEqual([]);
     expect(climateGuard.commands!(study)).toEqual(["climate_waive", "warm"]);
     expect(climateGuard.commandSchema!(study, house)["warm"]).toEqual({
-      doc: 'Heat a room to a temperature for a while (default 3 h), then put it back as it was; "off" instead of a temperature ends it early.',
+      doc: 'Heat a room to a temperature for a while (default 3 h), then put it back as it was. Instead of a temperature: "off" ends that early (back as it was); "stop" switches the room\'s heating off now.',
       args: [
         { name: "room", kind: "choice", choices: ["study"] },
-        { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off"], doc: "The setpoint, or off to end the wish." },
+        { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off", "stop"], doc: "The setpoint; off: end the wish, back as it was; stop: switch the heating off now." },
         { name: "duration", kind: "duration", maxMin: 360, defaultMin: 180, optional: true },
       ],
     });

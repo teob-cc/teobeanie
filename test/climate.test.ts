@@ -169,7 +169,7 @@ describe("climate-guard wish on the host", () => {
     expect(Object.keys(schemas).sort()).toEqual(["climate_waive", "warm"]);
     expect(schemas["warm"]!.args).toEqual([
       { name: "room", kind: "choice", choices: ["bedroom", "study"] },
-      { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off"], doc: "The setpoint, or off to end the wish." },
+      { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off", "stop"], doc: "The setpoint; off: end the wish, back as it was; stop: switch the heating off now." },
       { name: "duration", kind: "duration", maxMin: 360, defaultMin: 180, optional: true },
     ]);
     expect(schemas["climate_waive"]!.args[0]).toEqual({ name: "room", kind: "choice", choices: ["bedroom", "study"] });

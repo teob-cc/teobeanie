@@ -417,7 +417,7 @@ describe("voice over the climate guards", () => {
     expect(problems).toEqual([]);
     const { surfaces: [s] } = surfacesOf(["warm"], schemas);
     expect(s!.schema.args[0]).toMatchObject({ kind: "choice", choices: ["den", "hall"] });
-    expect(s!.schema.args[1]).toMatchObject({ kind: "number", min: 17, max: 22, or: ["off"] });
+    expect(s!.schema.args[1]).toMatchObject({ kind: "number", min: 17, max: 22, or: ["off", "stop"] });
     expect(check(s!, { room: "hall", temperature: 21, duration: 120 })).toEqual({ ok: true, args: ["hall", "21", "2h"] });
     expect(check(s!, { room: "hall", temperature: 23 })).toMatchObject({ ok: false, reason: expect.stringContaining("17–22") });
     expect(check(s!, { room: "den", temperature: "off" })).toEqual({ ok: true, args: ["den", "off"] });

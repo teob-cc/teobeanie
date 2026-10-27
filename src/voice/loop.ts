@@ -98,7 +98,7 @@ export function systemPrompt(i: UnderstandInput): string {
     "- Speech to text mishears: read the transcript for its meaning (a word that sounds like a room or a command word is that word).",
     "- Use only the rooms and values the tools take; the house's words below say what its people call them. A group (a floor, a level) is one call per room in it.",
     "- A value outside what a tool allows: call it anyway with the value said; the house refuses it with the reason, and you tell the speaker with say.",
-    "- A duration only when one was said.",
+    "- A value (a temperature, a duration) only when one was said: never make one up. A command that needs a value nobody said: ask.",
     "- Nothing for the house in the message: not_an_instruction. An instruction you cannot place: ask.",
     `- ${lang} Keep replies short and plain.`,
     "",

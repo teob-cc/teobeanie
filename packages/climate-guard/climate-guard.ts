@@ -26,6 +26,9 @@
 // where the guard holds none (a boiler's thermostat), the setpoint it had before. Someone
 // switching the unit off or to another mode ends the wish. A wish and a waiver never run
 // together: either ends the other. Several instances share the command, as the waiver.
+// `/warm bedroom stop` switches the heating off now (and ends a wish or a waiver): the
+// unit stays off until someone starts it, or the guard's start below startHeatBelow does.
+// A unit that has no off (a boiler's thermostat) says so, with its lowest setpoint.
 
 import {
   boundFor,
@@ -90,6 +93,12 @@ export interface ClimateGuardTexts {
   wishEndsWaiver: string;
   /** {room}: added to the waiver's reply when it ended a wish. */
   waiverEndsWish: string;
+  /** {room}: "stop" switched the heating off. */
+  stopped: string;
+  /** {room}: "stop", and the unit is off already. */
+  alreadyOff: string;
+  /** {room}; {min}: the lowest setpoint allowed: the unit has no off. */
+  cannotStop: string;
 }
 
 export const CLIMATE_GUARD_TEXTS: ClimateGuardTexts = {
@@ -109,6 +118,9 @@ export const CLIMATE_GUARD_TEXTS: ClimateGuardTexts = {
   unavailable: "{room} does not answer now; try again later.",
   wishEndsWaiver: "The waiver for {room} has ended.",
   waiverEndsWish: "The wish for {room} has ended.",
+  stopped: "{room}: heating switched off.",
+  alreadyOff: "{room} is off already.",
+  cannotStop: "{room} cannot be switched off from here; set it to {min}° instead.",
 };
 
 const CLIMATE_GUARD_PARAMS = param.object({
@@ -136,7 +148,7 @@ const CLIMATE_GUARD_PARAMS = param.object({
   warm: param
     .object({
       command: param.string().doc("Shared by the instances of the house's rooms; each answers for its own."),
-      room: param.string().doc("`/warm bedroom 21` (any case), `/warm bedroom 21 2h`; `/warm bedroom off` ends it early."),
+      room: param.string().doc("`/warm bedroom 21` (any case), `/warm bedroom 21 2h`; `/warm bedroom off` ends it early; `/warm bedroom stop` switches the heating off."),
       defaultHours: param.duration("h", { positive: true }).default(3).doc("How long a wish lasts when no duration is given."),
       maxHours: param.duration("h", { positive: true }).default(12).doc("The longest wish."),
     })
@@ -160,6 +172,9 @@ const CLIMATE_GUARD_PARAMS = param.object({
       unavailable: "{room}: the unit gives no state now.",
       wishEndsWaiver: "{room}: added to the wish's reply when it ended a waiver.",
       waiverEndsWish: "{room}: added to the waiver's reply when it ended a wish.",
+      stopped: '{room}: "stop" switched the heating off.',
+      alreadyOff: '{room}: "stop", and the unit is off already.',
+      cannotStop: "{room}; {min}: the lowest setpoint allowed: the unit has no off.",
     })
     .doc("Override any of the waiver's and the wish's messages (the English defaults stay for the rest)."),
 });
@@ -299,10 +314,10 @@ export const climateGuard: HeuristicDef<ClimateGuardParams, GuardState, RuleEven
     if (p.warm !== undefined) {
       const { min, max } = rangeOf({ house }, p.climate);
       out[p.warm.command] = {
-        doc: `Heat a room to a temperature for a while (default ${p.warm.defaultHours ?? 3} h), then put it back as it was; "off" instead of a temperature ends it early.`,
+        doc: `Heat a room to a temperature for a while (default ${p.warm.defaultHours ?? 3} h), then put it back as it was. Instead of a temperature: "off" ends that early (back as it was); "stop" switches the room's heating off now.`,
         args: [
           { name: "room", kind: "choice", choices: [p.warm.room] },
-          { name: "temperature", kind: "number", min, max, step: 0.5, unit: "°C", or: ["off"], doc: "The setpoint, or off to end the wish." },
+          { name: "temperature", kind: "number", min, max, step: 0.5, unit: "°C", or: ["off", "stop"], doc: "The setpoint; off: end the wish, back as it was; stop: switch the heating off now." },
           { name: "duration", kind: "duration", maxMin: (p.warm.maxHours ?? 12) * 60, defaultMin: (p.warm.defaultHours ?? 3) * 60, optional: true },
         ],
       };
@@ -474,6 +489,7 @@ function warmCommand(state: GuardState, input: CommandInput, ctx: DecideCtx<Clim
     if (state.wish === undefined) return reply(fill(t.notWished, { room: w.room }));
     return endWish(state, ctx, `ended early by ${by}`, { by, reply: true });
   }
+  if (asked.toLowerCase() === "stop") return duration !== undefined ? usage() : stop(state, ctx, by, reply);
   const target = parseTemperature(asked);
   if (target === undefined) return usage();
   const { min, max } = rangeOf(ctx, p.climate);
@@ -508,6 +524,29 @@ function warmCommand(state: GuardState, input: CommandInput, ctx: DecideCtx<Clim
       ...(ctx.timer(WISH_CHECK) !== undefined ? [cancelTimer(WISH_CHECK)] : []),
     ],
   };
+}
+
+/** "stop": the heating off now; a wish or a waiver under way ends. A unit with no off says so. */
+function stop(state: GuardState, ctx: DecideCtx<ClimateGuardParams>, by: string, reply: (text: string, extra?: GuardDecision) => GuardDecision): GuardDecision {
+  const p = ctx.params;
+  const room = p.warm!.room;
+  const t = textsOf(p);
+  const unit = ctx.get(p.climate);
+  if (unit === undefined || unit.state === "unavailable" || unit.state === "unknown") return reply(fill(t.unavailable, { room }));
+  const modes = unit.attributes["hvac_modes"];
+  if (Array.isArray(modes) && !modes.includes("off")) return reply(fill(t.cannotStop, { room, min: rangeOf(ctx, p.climate).min }));
+  const endsWish = state.wish !== undefined;
+  const endsWaiver = state.waiver !== undefined;
+  if (unit.state === "off" && !endsWish && !endsWaiver) return reply(fill(t.alreadyOff, { room }));
+  return reply(fill(t.stopped, { room }), {
+    why: `${p.warm!.command} stop by ${by}: ${p.climate} switched off${endsWish ? "; the wish ends" : ""}${endsWaiver ? "; the waiver ends" : ""}`,
+    events: [
+      ...(endsWish ? [{ tag: "WishEnded" as const, reason: `switched off by ${by}`, by }] : []),
+      ...(endsWaiver ? [{ tag: "WaiverEnded" as const, reason: `switched off by ${by}`, by }] : []),
+    ],
+    actions: [notify(fill(t.stopped, { room })), ...(unit.state !== "off" ? [call("climate.set_hvac_mode", p.climate, { hvac_mode: "off" })] : [])],
+    timers: [WISH, WISH_CHECK, WAIVER, EVAL].filter((id) => ctx.timer(id) !== undefined).map((id) => cancelTimer(id)),
+  });
 }
 
 /** While a wish runs: the unit heats at its setpoint; switched off or to another mode, the wish ends. */

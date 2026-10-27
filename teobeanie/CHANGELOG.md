@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — switching the heating off by voice
+
+- **climate-guard 1.2.0: `/warm <room> stop`** switches the room's heating off now, and
+  ends a wish or a waiver under way; the unit stays off until someone starts it, or the
+  guard's own start below `startHeatBelow`. `/warm <room> off` still ends a wish and puts
+  the unit back as it was. A unit with no off (a boiler's thermostat) answers with its
+  lowest setpoint instead. Voice offers both words: "switch the heating off" is `stop`.
+- **Voice never makes up a value.** The model asks when a command needs a temperature or
+  a duration nobody said, instead of choosing one.
+
 ## 0.8.0 — voice messages, heating wishes, the house's bounds
 
 - **Voice messages in the chat.** Say what you want instead of typing a command. The
