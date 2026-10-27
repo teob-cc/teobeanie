@@ -121,3 +121,58 @@ describe("climate-guard waiver on the host", () => {
     journal.close();
   });
 });
+
+describe("climate-guard wish on the host", () => {
+  const house = { bounds: [{ entityPrefix: "climate.", field: "temperature", min: 17, max: 22 }] };
+  const warm: ClimateGuardParams = { ...bedroom, warm: { command: "warm", room: "bedroom" } };
+
+  it("a restart keeps a running wish: its state folds from the journal, its timer stands", () => {
+    const sim = simulate(climateGuard, warm, heating(), { ...tz, house }).start();
+    sim.command("warm", ["bedroom", "21", "2h"], alex);
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 21 })).advance(hours(1));
+    sim.start(); // the add-on restarts
+    expect(sim.whys().at(-1)).toBe("wish holds: climate.bedroom heats at 21° until 09:00");
+    expect(sim.timers["wish"]?.at).toBe(sim.now + hours(1));
+    const folded = sim.journal
+      .map((e) => e.event)
+      .filter((e) => !isKernelEvent(e))
+      .reduce((s, e) => climateGuard.evolve(s, e as never), climateGuard.initial(warm));
+    expect(folded).toEqual(sim.state);
+    expect(folded.wish).toMatchObject({ by: "alex", target: 21, until: sim.now + hours(1), before: { mode: "heat", temperature: 20 } });
+    // Ran out while the add-on was down: the start ends it, puts the guard's setpoint back and cancels the overdue timer.
+    const now = sim.now + hours(2);
+    const unit = { value: null, state: "heat", since: 0, attributes: { current_temperature: 20, temperature: 21 } };
+    const ctx = { now, params: warm, instance: "sim", get: (e: string) => (e === "climate.bedroom" ? unit : undefined), value: () => undefined, timer: (id: string) => (id === "wish" ? now - hours(1) : undefined), fact: () => undefined, house: { ...tz, ...house } };
+    const d = climateGuard.decide(folded, { kind: "start", at: now }, ctx);
+    expect(d?.events?.[0]).toEqual({ tag: "WishEnded", reason: "ran out" });
+    expect(d?.timers?.[0]).toEqual({ op: "cancel", timer: "wish" });
+    expect(d?.actions?.at(-1)).toMatchObject({ service: "climate.set_temperature", data: { temperature: 20 } });
+  });
+
+  it("the typed commands of the active instances, merged; shadow ones left out", () => {
+    const study: ClimateGuardParams = { ...bedroom, climate: "climate.study", waive: { command: "climate_waive", room: "study" }, warm: { command: "warm", room: "study", maxHours: 6 } };
+    const logged: string[] = [];
+    const host = createHeuristicHost({
+      library: [climateGuard],
+      instances: [
+        { heuristic: "climate-guard", id: "study", mode: "active", params: study },
+        { heuristic: "climate-guard", id: "bedroom", mode: "active", params: warm },
+        { heuristic: "climate-guard", id: "den", mode: "shadow", params: { ...warm, climate: "climate.den", warm: { command: "warm", room: "den" } } },
+      ],
+      actuator: createSafeActuator({ ha: { callService: async () => ({ context: { id: "c" } }) } }),
+      liveState: () => undefined,
+      house,
+      forceShadow: false,
+      log: (_l, m) => void logged.push(m),
+    });
+    const schemas = host.commandSchemas();
+    expect(Object.keys(schemas).sort()).toEqual(["climate_waive", "warm"]);
+    expect(schemas["warm"]!.args).toEqual([
+      { name: "room", kind: "choice", choices: ["bedroom", "study"] },
+      { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off"], doc: "The setpoint, or off to end the wish." },
+      { name: "duration", kind: "duration", maxMin: 360, defaultMin: 180, optional: true },
+    ]);
+    expect(schemas["climate_waive"]!.args[0]).toEqual({ name: "room", kind: "choice", choices: ["bedroom", "study"] });
+    expect(logged).toEqual([]);
+  });
+});

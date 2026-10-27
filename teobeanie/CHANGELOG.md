@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — heating wishes and the house's bounds
+
+- **The house's own bounds.** `allowlist.json` takes `"bounds"`, e.g.
+  `[{ "entityPrefix": "climate.", "field": "temperature", "min": 17, "max": 22 }]`. They
+  come after the SafeActuator's code bounds and every matching bound must pass, so they
+  only narrow (a wider one changes nothing). A reload applies them at the next call.
+  Decisions read them as `ctx.house.bounds` (`boundFor`), the MCP `house_scope` tool lists
+  them, and the simulator vets a spec's calls against `simulate(..., { house: { bounds } })`.
+- **Typed commands.** A heuristic may describe its commands' arguments
+  (`commandSchema(params, house)`: choices, numbers with a range and `or` words, durations
+  read by `parseDuration`); the host merges them over the active instances per command
+  (`commandSchemas()`), for a voice front end to offer and check against.
+- **climate-guard 1.1.0: the wish.** Optional `warm` (`{ "command": "warm", "room": "bedroom" }`):
+  `/warm bedroom 21 2h` heats the room at 21° for 2 h (default 3 h, at most `maxHours`, 12),
+  within the house's bounds, with no longest run; then the unit goes back as it was (off
+  stays off; a heating unit gets the guard's setpoint and a fresh longest run, or the
+  setpoint it had where the guard holds none). Someone switching it off ends it; a wish and
+  a waiver end each other. `"setpoints": {}` makes a guard that only answers wishes, for a
+  boiler's thermostat.
+
 ## 0.7.0 — the Infra tab
 
 - **New panel tab: Infra.** The house's infrastructure as Home Assistant sees it now, with

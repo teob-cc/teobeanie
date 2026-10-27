@@ -1,8 +1,8 @@
-// climate-guard: setpoints per mode, a longest run, a start below or above a room temperature; the waiver.
+// climate-guard: setpoints per mode, a longest run, a start below or above a room temperature; the waiver; the wish.
 
 import { describe, expect, it, simulate } from "teobeanie/test";
 import { hours, minutes, seconds } from "teobeanie";
-import { climateGuard, type ClimateGuardParams } from "./climate-guard.ts";
+import { climateGuard, type ClimateGuardParams, type ClimateGuardState } from "./climate-guard.ts";
 
 const den: ClimateGuardParams = {
   climate: "climate.den_unit",
@@ -192,4 +192,176 @@ describe("climate-guard waiver", () => {
     expect(climateGuard.commands!(bedroom)).toEqual(["climate_waive"]);
   });
 
+});
+
+// The wish: a command heats one room to a temperature for a while, then puts it back.
+
+const warmBedroom: ClimateGuardParams = { ...bedroom, warm: { command: "warm", room: "bedroom" } };
+// The house keeps heating setpoints between 17 and 22, after the code's own 15–27.
+const house = {
+  bounds: [
+    { entityPrefix: "climate.", field: "temperature", min: 15, max: 27 },
+    { entityPrefix: "climate.", field: "temperature", min: 17, max: 22 },
+  ],
+};
+const at = { ...tz, house };
+const offBed = (current = 18, temperature = 20) => ({ "climate.bedroom": { state: "off", attributes: { current_temperature: current, temperature } } });
+/** The calls to the unit, with their data. */
+const unitCalls = (sim: { actions(): Array<{ action: { kind: string; service?: string; data?: unknown } }> }) =>
+  sim.actions().flatMap(({ action: a }) => (a.kind === "call" ? [`${a.service} ${JSON.stringify(a.data)}`] : []));
+const replies = (sim: { calls(): string[] }) => sim.calls().filter((c) => c.startsWith("notify: ")).map((c) => c.slice(8));
+const stateOf = (sim: { state: unknown }) => sim.state as ClimateGuardState;
+
+describe("climate-guard wish", () => {
+  it("heats a unit that is off for the wish, then switches it off again", () => {
+    const sim = simulate(climateGuard, warmBedroom, offBed(), at).start();
+    sim.command("warm", ["bedroom", "21", "2h"], alex);
+    expect(replies(sim)).toEqual(["bedroom heats to 21° until 09:00."]);
+    expect(unitCalls(sim)).toEqual(['climate.set_hvac_mode {"hvac_mode":"heat"}', 'climate.set_temperature {"temperature":21}']);
+    expect(sim.journal.map((e) => e.event)).toContainEqual({ tag: "Wished", by: "alex", target: 21, until: sim.now + hours(2), untilText: "09:00", before: { mode: "off", temperature: 20 }, at: sim.now });
+    expect(sim.card().card?.fields.at(-1)).toEqual({ label: "Wish", value: "21° until 09:00", tone: "warn" });
+    expect(sim.card().card?.buttons).toEqual([{ label: "End the wish", command: "warm", args: ["bedroom", "off"] }]);
+    sim.set(...bed("heat", { current_temperature: 18, temperature: 21 })).advance(hours(2) - minutes(1));
+    expect(unitCalls(sim)).toHaveLength(2);
+    sim.advance(minutes(1));
+    expect(replies(sim).at(-1)).toBe("bedroom is back as it was before the wish.");
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_hvac_mode {"hvac_mode":"off"}');
+    expect(stateOf(sim).wish).toBeUndefined();
+    // Back off, and not cold enough for the guard's own start.
+    sim.set(...bed("off", { current_temperature: 19, temperature: 21 })).advance(hours(1));
+    expect(unitCalls(sim)).toHaveLength(3);
+  });
+
+  it("a running unit: no longest run during the wish; then the guard's setpoint and a run counted from the wish's end", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
+    sim.advance(hours(1)).command("warm", ["bedroom", "22"], alex);
+    // The default 3 h.
+    expect(replies(sim)).toEqual(["bedroom heats to 22° until 11:00."]);
+    expect(unitCalls(sim)).toEqual(['climate.set_temperature {"temperature":22}']);
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 22 }));
+    // The run passes the guard's 3 h: not switched off.
+    sim.advance(hours(3) - minutes(1));
+    expect(unitCalls(sim)).toHaveLength(1);
+    sim.advance(minutes(1));
+    expect(unitCalls(sim).slice(1)).toEqual(['climate.set_temperature {"temperature":20}']);
+    sim.set(...bed("heat", { current_temperature: 21, temperature: 20 })).advance(hours(3) - minutes(1));
+    expect(unitCalls(sim)).toHaveLength(2);
+    sim.advance(minutes(1));
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_hvac_mode {"hvac_mode":"off"}');
+  });
+
+  it("a thermostat the guard holds nothing for: the wish's setpoint, then the one it had", () => {
+    const thermostat: ClimateGuardParams = { climate: "climate.study", setpoints: {}, warm: { command: "warm", room: "study" } };
+    const sim = simulate(climateGuard, thermostat, { "climate.study": { state: "heat", attributes: { current_temperature: 19, temperature: 19 } } }, at).start();
+    sim.advance(hours(5));
+    expect(unitCalls(sim)).toEqual([]);
+    sim.command("warm", ["Study", "21", "2"], alex);
+    expect(replies(sim)).toEqual(["study heats to 21° until 14:00."]);
+    expect(unitCalls(sim)).toEqual(['climate.set_temperature {"temperature":21}']);
+    // Its drift is set back, once the grace has passed since the send.
+    sim.set("climate.study", "heat", { current_temperature: 19.5, temperature: 19 });
+    expect(unitCalls(sim)).toHaveLength(1);
+    sim.advance(minutes(5));
+    expect(unitCalls(sim)).toEqual(['climate.set_temperature {"temperature":21}', 'climate.set_temperature {"temperature":21}']);
+    sim.set("climate.study", "heat", { current_temperature: 20, temperature: 21 }).advance(hours(2));
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_temperature {"temperature":19}');
+    sim.set("climate.study", "heat", { current_temperature: 21, temperature: 19 }).advance(hours(5));
+    expect(unitCalls(sim)).toHaveLength(3);
+  });
+
+  it("a person's change through HA becomes the wish's", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
+    sim.command("warm", ["bedroom", "21"], alex);
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 21 })).advance(minutes(20));
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 21.5 }), { user: "u-alex" }).advance(minutes(20));
+    expect(stateOf(sim).wish?.target).toBe(21.5);
+    expect(unitCalls(sim)).toHaveLength(1);
+  });
+
+  it("refuses what the house's bounds do not allow, a wish too long, and what is not a temperature", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
+    sim.command("warm", ["bedroom", "23"], alex).command("warm", ["bedroom", "16.5"], alex);
+    sim.command("warm", ["bedroom", "21", "13h"], alex).command("warm", ["bedroom", "warm"], alex).command("warm", ["bedroom"], alex);
+    expect(replies(sim)).toEqual([
+      "bedroom can be set between 17° and 22°, not 23°.",
+      "bedroom can be set between 17° and 22°, not 16.5°.",
+      "A wish lasts at most 12 h.",
+      "/warm bedroom 21 heats bedroom to 21° for 3 h; add a duration (2h, 90m) for another; /warm bedroom off ends it.",
+      "/warm bedroom 21 heats bedroom to 21° for 3 h; add a duration (2h, 90m) for another; /warm bedroom off ends it.",
+    ]);
+    expect(unitCalls(sim)).toEqual([]);
+    // Commas and degrees are read; half degrees kept.
+    sim.command("warm", ["bedroom", "21,5°", "90m"], alex);
+    expect(replies(sim).at(-1)).toBe("bedroom heats to 21.5° until 08:30.");
+  });
+
+  it("off ends it early and puts the unit back; off without a wish says so", () => {
+    const sim = simulate(climateGuard, warmBedroom, offBed(), at).start();
+    sim.command("warm", ["bedroom", "off"], alex);
+    expect(replies(sim)).toEqual(["No wish runs for bedroom, nothing to end."]);
+    sim.command("warm", ["bedroom", "21"], alex);
+    sim.set(...bed("heat", { current_temperature: 18, temperature: 21 })).advance(minutes(30));
+    sim.command("warm", ["bedroom", "off"], { channel: "voice", user: "sam" });
+    expect(replies(sim).at(-1)).toBe("bedroom is back as it was before the wish.");
+    expect(sim.actions().filter((a) => a.action.kind === "notify").at(-1)!.action).not.toHaveProperty("info");
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_hvac_mode {"hvac_mode":"off"}');
+    expect(sim.whys().at(-1)).toMatch(/^wish for bedroom ended early by sam: back to off at 20°/);
+    expect(sim.timers["wish"]).toBeUndefined();
+  });
+
+  it("someone switching the unit off ends the wish, and it stays off", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
+    sim.command("warm", ["bedroom", "21"], alex);
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 21 })).advance(minutes(30));
+    sim.set(...bed("off", { current_temperature: 20, temperature: 21 }), { user: "u-alex" });
+    expect(replies(sim).at(-1)).toBe("The wish for bedroom has ended: the unit was switched off.");
+    expect(sim.whys().at(-1)).toMatch(/^wish for bedroom the unit was switched off by user u-alex/);
+    expect(unitCalls(sim)).toEqual(['climate.set_temperature {"temperature":21}']);
+    expect(stateOf(sim).wish).toBeUndefined();
+    sim.advance(hours(4));
+    expect(unitCalls(sim)).toHaveLength(1);
+  });
+
+  it("a wish ends a waiver, and a waiver ends a wish, leaving the unit as it is", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(), at).start();
+    sim.command("climate_waive", ["bedroom"], alex);
+    sim.command("warm", ["bedroom", "21"], alex);
+    expect(replies(sim).at(-1)).toBe("bedroom heats to 21° until 10:00. The waiver for bedroom has ended.");
+    expect(stateOf(sim).waiver).toBeUndefined();
+    expect(sim.timers["waiver"]).toBeUndefined();
+    sim.set(...bed("heat", { current_temperature: 19, temperature: 21 }));
+    sim.command("climate_waive", ["bedroom"], alex);
+    expect(replies(sim).at(-1)).toBe("Climate guard lifted for bedroom until 10:00. The wish for bedroom has ended.");
+    expect(stateOf(sim).wish).toBeUndefined();
+    expect(sim.timers["wish"]).toBeUndefined();
+    // Nothing is put back: the waiver leaves the unit alone.
+    expect(unitCalls(sim)).toEqual(['climate.set_temperature {"temperature":21}']);
+  });
+
+  it("rooms share the command; the schema keeps to the house's bounds", () => {
+    const study: ClimateGuardParams = { ...bedroom, climate: "climate.study", warm: { command: "warm", room: "study", maxHours: 6 } };
+    const a = simulate(climateGuard, warmBedroom, heating(), at).start();
+    const b = simulate(climateGuard, study, { "climate.study": { state: "heat", attributes: { current_temperature: 19, temperature: 20 } } }, at).start();
+    for (const s of [a, b]) s.command("warm", ["kitchen", "21"], alex, ["bedroom", "study"]);
+    expect(replies(a)).toEqual(['No room "kitchen". Rooms: /warm bedroom, /warm study.']);
+    expect(replies(b)).toEqual([]);
+    expect(climateGuard.commands!(study)).toEqual(["climate_waive", "warm"]);
+    expect(climateGuard.commandSchema!(study, house)["warm"]).toEqual({
+      doc: 'Heat a room to a temperature for a while (default 3 h), then put it back as it was; "off" instead of a temperature ends it early.',
+      args: [
+        { name: "room", kind: "choice", choices: ["study"] },
+        { name: "temperature", kind: "number", min: 17, max: 22, step: 0.5, unit: "°C", or: ["off"], doc: "The setpoint, or off to end the wish." },
+        { name: "duration", kind: "duration", maxMin: 360, defaultMin: 180, optional: true },
+      ],
+    });
+    expect(climateGuard.commandSchema!(study, house)["climate_waive"]?.args.map((x) => x.name)).toEqual(["room", "action"]);
+    // Without the house's bounds, the SafeActuator's own.
+    expect(climateGuard.commandSchema!(study, {})["warm"]?.args[1]).toMatchObject({ min: 15, max: 27 });
+  });
+
+  it("a setpoint outside the house's bounds is refused anyway, whoever decides it", () => {
+    const hot: ClimateGuardParams = { ...bedroom, setpoints: { heat: 25 } };
+    const sim = simulate(climateGuard, hot, heating(), at).start();
+    expect(sim.actions()).toMatchObject([{ disposition: "refused", reason: "temperature=25 outside 17–22 for climate.bedroom" }]);
+  });
 });
