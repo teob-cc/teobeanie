@@ -8,10 +8,14 @@ import type { VoiceLane, VoiceTrial } from "./lane.js";
 
 const MAX_PHRASES = 20;
 
-/** "/warm hall 21 2h; /pet away", "not_instruction" or "clarify": what a phrase must become. */
+/**
+ * What a phrase must become: "/warm hall 21 2h; /pet away", not_instruction, clarify, or
+ * refused (an instruction the house would not take: nothing runs, the model says why).
+ */
 export function meets(t: VoiceTrial, expect: string): boolean {
   const e = expect.trim();
   if (e === "not_instruction" || e === "clarify" || e === "failed") return t.kind === e;
+  if (e === "refused") return t.kind === "instruction" && t.calls.length === 0 && t.reply !== undefined;
   const want = e.split(";").map((c) => c.trim().replace(/\s+/g, " ")).filter(Boolean).sort();
   return t.kind === "instruction" && JSON.stringify([...t.calls].sort()) === JSON.stringify(want);
 }
@@ -20,7 +24,7 @@ export function createVoiceTools(deps: { lane: VoiceLane; caller: () => string }
   return [
     tool(
       "voice_try",
-      `Try phrases as if someone had said them in the chat: the voice lane's own loop (voice.json's commands, their schemas as the instances run now, its glossary and model) says what each would run, or that it is not an instruction, or what it would ask back. Nothing runs, in any voice mode; each phrase is one model call or a few, journaled (teob-voice, chat "mcp") and counted in the month's budget. expect (optional, one per phrase): the commands it must become, "; "-separated as typed ("/warm hall 21 2h; /cat away"), or not_instruction, clarify; the answer then says which pass. At most ${MAX_PHRASES} phrases.`,
+      `Try phrases as if someone had said them in the chat: the voice lane's own loop (voice.json's commands, their schemas as the instances run now, its glossary and model) says what each would run, or that it is not an instruction, or what it would ask back. Nothing runs, in any voice mode; each phrase is one model call or a few, journaled (teob-voice, chat "mcp") and counted in the month's budget. expect (optional, one per phrase): the commands it must become, "; "-separated as typed ("/warm hall 21 2h; /cat away"), or not_instruction, clarify, refused (nothing runs and the model says why); the answer then says which pass. At most ${MAX_PHRASES} phrases.`,
       {
         say: { type: "array", items: { type: "string" }, description: "the phrases, in the speakers' language" },
         expect: { type: "array", items: { type: "string" }, description: "per phrase: what it must become" },

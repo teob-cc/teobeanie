@@ -398,5 +398,7 @@ describe("voice_try", () => {
       ["mcp", "mcp:agent", "shadow", "not_instruction"],
     ]);
     expect(meets({ say: "", kind: "instruction", calls: ["/pet away", "/warm den 20"] }, "/warm den 20; /pet away")).toBe(true);
+    expect(meets({ say: "", kind: "instruction", calls: [], reply: "25° нельзя." }, "refused")).toBe(true);
+    expect(meets({ say: "", kind: "instruction", calls: ["/pet away"], reply: "25° нельзя." }, "refused")).toBe(false);
   });
 });
