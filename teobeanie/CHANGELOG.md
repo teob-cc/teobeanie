@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — upgrading a package
+## 0.8.2 — upgrading a package
 
 - **`package_install` upgrades.** An installed starter package the add-on ships a newer
   version of (`upstream` in `package_list`) is replaced with it in one revision, the lock
