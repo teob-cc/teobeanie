@@ -10,12 +10,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RouteSpec } from "@lambda-house/teob-ts/ha";
-import type { HouseFacts, OutdoorSources } from "./kernel/heuristic.js";
+import { DEFAULT_BOUNDS } from "./kernel/actuator.js";
+import type { HouseBound, HouseFacts, OutdoorSources } from "./kernel/heuristic.js";
 
 export interface AllowlistFile {
   policyVersion?: number;
   /** Where the outdoor conditions come from; every entity must be listed below. */
   outdoor?: OutdoorSources;
+  /**
+   * The house's own bounds on service data, e.g. heating setpoints between 17 and 22:
+   * { "entityPrefix": "climate.", "field": "temperature", "min": 17, "max": 22 }. They come
+   * after the code's (DEFAULT_BOUNDS) and every matching bound must pass, so they can
+   * only narrow what the SafeActuator allows, never widen it.
+   */
+  bounds?: HouseBound[];
   entities: Array<{
     id: string;
     /** Default "on-change". */
@@ -66,7 +74,7 @@ export interface Allowlist {
   policyVersion: number;
   routes: RouteSpec[];
   scope: HouseScope;
-  /** Facts every decision sees (the outdoor sources). */
+  /** Facts every decision sees: the outdoor sources, and the bounds (the code's, then the house's). */
   house: HouseFacts;
   /** False when no allowlist.json exists and the starter example stands in. */
   fromFile: boolean;
@@ -83,7 +91,8 @@ function packageRoot(): string {
  * Load and validate the entity allowlist.
  *
  * Throws with a precise message on: unparseable JSON, missing entities array,
- * duplicate id, unknown debounce class, deadband route without params.deadband.
+ * duplicate id, unknown debounce class, deadband route without params.deadband, a
+ * malformed bound.
  */
 export function loadAllowlist(dataDir: string, log: (l: string, m: string) => void): Allowlist {
   const primary = join(dataDir, "allowlist.json");
@@ -141,7 +150,7 @@ export function loadAllowlist(dataDir: string, log: (l: string, m: string) => vo
     routes.map((r) => r.entityId),
     file.entities.filter((e) => e.operate === true).map((e) => e.id),
   );
-  const house: HouseFacts = {};
+  const house: HouseFacts = { bounds: [...DEFAULT_BOUNDS, ...houseBounds(file.bounds, path)] };
   if (file.outdoor !== undefined) {
     const o = file.outdoor as Record<string, unknown>;
     for (const [k, v] of Object.entries(o)) {
@@ -154,4 +163,24 @@ export function loadAllowlist(dataDir: string, log: (l: string, m: string) => vo
     house.outdoor = file.outdoor;
   }
   return { policyVersion, routes, scope, house, fromFile: path === primary };
+}
+
+/** allowlist.json "bounds", checked: each an id prefix, a field and a range. */
+function houseBounds(raw: unknown, path: string): HouseBound[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new Error(`allowlist ${path}: "bounds" must be an array`);
+  return raw.map((b: unknown, i) => {
+    const at = `allowlist ${path}: bounds[${i}]`;
+    if (typeof b !== "object" || b === null || Array.isArray(b)) throw new Error(`${at} must be an object`);
+    const o = b as Record<string, unknown>;
+    for (const k of Object.keys(o)) {
+      if (!["entityPrefix", "field", "min", "max"].includes(k)) throw new Error(`${at} has an unknown key "${k}"`);
+    }
+    const { entityPrefix, field, min, max } = o;
+    if (typeof entityPrefix !== "string" || entityPrefix === "") throw new Error(`${at} needs an "entityPrefix" ("climate." or an entity id)`);
+    if (typeof field !== "string" || field === "") throw new Error(`${at} needs a "field" (a service data field, e.g. "temperature")`);
+    if (typeof min !== "number" || !Number.isFinite(min) || typeof max !== "number" || !Number.isFinite(max)) throw new Error(`${at} needs numbers "min" and "max"`);
+    if (min > max) throw new Error(`${at}: min ${min} is above max ${max}`);
+    return { entityPrefix, field, min, max };
+  });
 }

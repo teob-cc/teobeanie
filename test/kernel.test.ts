@@ -3,7 +3,8 @@ import { EntityId, extractEvents, ulid, type Effect } from "@lambda-house/teob-t
 import { createMockControl } from "@lambda-house/teob-ts/testing";
 import { call, defineHeuristic, minutes, notify, setTimer, type Observed } from "../src/kernel/heuristic.js";
 import { compileHeuristic, decideStep, type KCommand, type KState } from "../src/kernel/kernel.js";
-import { createSafeActuator, type SafeActuator } from "../src/kernel/actuator.js";
+import { createSafeActuator, DEFAULT_BOUNDS, type SafeActuator } from "../src/kernel/actuator.js";
+import { mergeCommandSchemas } from "../src/kernel/command-schema.js";
 import { relayPulse } from "../packages/relay-pulse/relay-pulse.ts";
 import { houseScope } from "../src/allowlist.js";
 import { createHeuristicHost } from "../src/kernel/host.js";
@@ -196,6 +197,23 @@ describe("SafeActuator.vet", () => {
     expect(a.vet("h/a", call("switch.turn_off", "switch.water_valve"), 0, 10)).toEqual({ ok: true });
   });
 
+  it("the house's bounds narrow the code's, never widen them, and a reload applies at the next vet", () => {
+    let house = [{ entityPrefix: "climate.", field: "temperature", min: 17, max: 22 }];
+    const a = createSafeActuator({ ha: { callService: async () => ({ context: { id: "c" } }) }, bounds: () => [...DEFAULT_BOUNDS, ...house] });
+    a.claim("h/a", ["climate.x"]);
+    const set = (t: number) => a.vet("h/a", call("climate.set_temperature", "climate.x", { temperature: t }), 0, 10, true);
+    expect(set(21)).toEqual({ ok: true });
+    expect(set(23)).toEqual({ ok: false, reason: "temperature=23 outside 17–22 for climate.x" });
+    expect(set(16)).toMatchObject({ ok: false });
+    // Wider than the code's: the code's 15–27 still holds.
+    house = [{ entityPrefix: "climate.", field: "temperature", min: 5, max: 35 }];
+    expect(set(23)).toEqual({ ok: true });
+    expect(set(30)).toEqual({ ok: false, reason: "temperature=30 outside 15–27 for climate.x" });
+    // One entity narrower than the rest.
+    house = [{ entityPrefix: "climate.x", field: "temperature", min: 18, max: 20 }];
+    expect(set(21)).toMatchObject({ ok: false });
+  });
+
   it("never calls outside the house's operation scope, whoever claims the entity", () => {
     const a = createSafeActuator({ ha: { callService: async () => ({ context: { id: "c" } }) }, scope: houseScope(["light.b"], ["light.a"]) });
     a.claim("h/a", ["light.a", "light.b"]);
@@ -331,5 +349,41 @@ describe("heuristic host and the house's time zone", () => {
     await vi.waitFor(() => expect(whys().sort()).toEqual(["in America/New_York", "in UTC"]));
     await host.stop();
     journal.close();
+  });
+});
+
+describe("command schemas merged over the instances", () => {
+  const warm = (room: string, min: number, max: number, maxMin: number) => ({
+    doc: `warm ${room}`,
+    args: [
+      { name: "room", kind: "choice" as const, choices: [room] },
+      { name: "temperature", kind: "number" as const, min, max, or: ["off"] },
+      { name: "duration", kind: "duration" as const, maxMin, optional: true },
+    ],
+  });
+
+  it("choices add up, ranges narrow, the first doc stands", () => {
+    const { schemas, problems } = mergeCommandSchemas([
+      { key: "g/b", schemas: { warm: warm("b", 15, 27, 720) } },
+      { key: "g/a", schemas: { warm: warm("a", 17, 22, 360) } },
+    ]);
+    expect(problems).toEqual([]);
+    expect(schemas["warm"]).toEqual({
+      doc: "warm b",
+      args: [
+        { name: "room", kind: "choice", choices: ["a", "b"] },
+        { name: "temperature", kind: "number", min: 17, max: 22, or: ["off"] },
+        { name: "duration", kind: "duration", maxMin: 360, optional: true },
+      ],
+    });
+  });
+
+  it("an instance that describes the command otherwise is left out of it, as a problem", () => {
+    const { schemas, problems } = mergeCommandSchemas([
+      { key: "g/a", schemas: { warm: warm("a", 17, 22, 360) } },
+      { key: "x/c", schemas: { warm: { doc: "other", args: [{ name: "room", kind: "choice", choices: ["c"] }] } } },
+    ]);
+    expect(schemas["warm"]!.args[0]).toEqual({ name: "room", kind: "choice", choices: ["a"] });
+    expect(problems).toEqual(["x/c describes /warm otherwise than g/a (room:choice): left out of its schema"]);
   });
 });

@@ -177,7 +177,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
   return [
     tool(
       "house_scope",
-      "The house scope: how many Home Assistant entities Teobeanie observes, by domain, and the ones it may operate. Anything else in Home Assistant is outside the house: ha_registry and ha_states read it, without recording it.",
+      "The house scope: how many Home Assistant entities Teobeanie observes, by domain, and the ones it may operate, and the bounds every call keeps to (the code's, then the house's own from allowlist.json; every matching bound must pass, so the house's only narrow). Anything else in Home Assistant is outside the house: ha_registry and ha_states read it, without recording it.",
       {},
       () => {
         const byDomain: Record<string, { observed: number; operable: number }> = {};
@@ -191,6 +191,7 @@ export function createHouseTools(deps: HouseToolDeps): MCPTool[] {
           observed: deps.scope.observed.length,
           by_domain: byDomain,
           ...(deps.house.outdoor ? { outdoor_sources: deps.house.outdoor } : {}),
+          ...(deps.house.bounds ? { bounds: deps.house.bounds } : {}),
           operable: deps.scope.operated.map((id) => ({ id, name: name(id), state: deps.liveState(id)?.state })),
         };
       },

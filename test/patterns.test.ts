@@ -99,7 +99,7 @@ describe("outdoor conditions", () => {
     const write = (outdoor: unknown) =>
       writeFileSync(join(dir, "allowlist.json"), JSON.stringify({ entities: [{ id: "weather.home" }, { id: "sensor.outside_temp" }], outdoor }));
     write({ weather: "weather.home", temperature: "sensor.outside_temp" });
-    expect(loadAllowlist(dir, () => {}).house).toEqual({ outdoor: { weather: "weather.home", temperature: "sensor.outside_temp" } });
+    expect(loadAllowlist(dir, () => {}).house.outdoor).toEqual({ weather: "weather.home", temperature: "sensor.outside_temp" });
     write({ weather: "weather.home", humidity: "sensor.not_listed" });
     expect(() => loadAllowlist(dir, () => {})).toThrow(/outdoor.humidity must be an entity listed/);
   });

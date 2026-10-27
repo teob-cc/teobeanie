@@ -239,7 +239,8 @@ decider `ctx.fact(id)` with the fact declared in `facts`; a change is a `fact` i
 Both declare what they touch: `watch`, `reads`, `facts`, `actuates` (the ownership claim),
 `shares` (others may use it too), `uses`, `commands` (and `commandArg`, the argument it
 answers for when several instances share a command; `commandHelp`, its line in the
-bot's menu; `commandButtons`, what a chat keyboard offers for it), `triggers` (HA time or MQTT
+bot's menu; `commandButtons`, what a chat keyboard offers for it; `commandSchema`, its
+arguments typed, which the host merges per command for a voice front end), `triggers` (HA time or MQTT
 triggers), `forbids`. The host checks every declaration against the house scope before
 an instance starts, and two owners of one entity is an error.
 
@@ -321,7 +322,8 @@ and therefore journaled.
 well-formed service; never `toggle`; a target; for each entity, in the operation scope
 (`"operate": true` in `allowlist.json`), owned by this instance or shared with it, not
 forbidden (`leak-shutoff` forbids reopening its valve for everyone), within bounds
-(climate 15–27 °C, brightness, position and fan percentage 0–100); and under 30 calls
+(climate 15–27 °C, brightness, position and fan percentage 0–100, then the house's own
+from `allowlist.json`, which can only narrow them); and under 30 calls
 per entity per hour. In shadow mode the vetted action is journaled as suppressed; in
 active mode it is requested and executed.
 
@@ -439,7 +441,7 @@ which is one house's and which its people view and edit.
 | | Scaffolding (this repository, the image) | Working set (the config folder) |
 |---|---|---|
 | Code | `src/kernel` (rules, deciders, host, actuator, simulator), `src/packages` (manifest, loader, lock), `src/house`, `src/mcp`, `src/studio`, `src/monitor.ts`, `src/telegram.ts`, `src/reload.ts`, the panel | `packages/*/` (the starter packages as installed, changed or not, and the house's own) and `heuristics/*.ts` (its own rules and deciders), with their tests |
-| Configuration | add-on options (chats, monitor, budget) | `heuristics.json` (instances: mode, params, alerts), `allowlist.json` (scope, operate, routes, outdoor), `tiles.json` (House groups, names, keywords) |
+| Configuration | add-on options (chats, monitor, budget) | `heuristics.json` (instances: mode, params, alerts), `allowlist.json` (scope, operate, routes, outdoor, bounds), `tiles.json` (House groups, names, keywords) |
 | Generated | — | `heuristics/ha.d.ts`, `.teob/`, `tsconfig.json`, `teobeanie.lock.json` |
 | Record | — | `/data` (the journal is the house's, but it is not edited) |
 | Starter set | `packages/` (the generic behaviours, copied into the config folder) | — |
@@ -657,7 +659,7 @@ Next:
 src/
   main.ts            composition root, numbered steps
   config.ts          options and the add-on / standalone split
-  allowlist.ts       the house scope, routes, outdoor sources
+  allowlist.ts       the house scope, routes, outdoor sources, the house's bounds
   kernel/
     heuristic.ts     Input, Action, Decision, DecideCtx, defineHeuristic, helpers
     rule.ts          rule(): World, Entity handles, held/within/between, enforce, compile

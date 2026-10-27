@@ -20,7 +20,8 @@ import { fileURLToPath } from "node:url";
 import { CategoryId, EntityId, SequenceNr, categoryTypes, tagCodec, ulid, type EntityRuntime, type Journal, type JournalReader, type OnPersisted } from "@lambda-house/teob-ts/core";
 import { createInMemoryRuntime, registration } from "@lambda-house/teob-ts/inmem";
 import { normalizeState, type HaClient, type HaEntityState, type SignalRow } from "@lambda-house/teob-ts/ha";
-import { commandArgs, outdoorEntities, type AnyHeuristic, type CommandSource, type HouseFacts, type Input, type Observed } from "./heuristic.js";
+import { commandArgs, outdoorEntities, type AnyHeuristic, type CommandSchema, type CommandSource, type HouseFacts, type Input, type Observed } from "./heuristic.js";
+import { mergeCommandSchemas, type InstanceSchemas } from "./command-schema.js";
 import type { Mode, SafeActuator } from "./actuator.js";
 import { validateParams } from "./params.js";
 import { notifyPerHourProblem } from "./instance-check.js";
@@ -227,6 +228,12 @@ export interface HeuristicHost {
   commandMenu(): MenuCommand[];
   /** The keyboard for a command with arguments, as the active instances stand now; none without. */
   commandKeyboard(name: string): CommandKeyboard | undefined;
+  /**
+   * The typed commands of the active instances (HeuristicDef.commandSchema), merged per
+   * command (command-schema.ts), as the house's bounds stand now. A shadow instance never
+   * replies, so its commands are not offered, as in the menu.
+   */
+  commandSchemas(): Record<string, CommandSchema>;
   /** The card of every active and shadow instance whose heuristic has a view(), as it stands now. */
   cards(): InstanceCard[];
   /** Every fact that runs, with its value and since. */
@@ -481,7 +488,17 @@ export function createHeuristicHost(
     get timeZone() {
       return opts.timeZone?.() ?? house.timeZone;
     },
+    get bounds() {
+      return house.bounds;
+    },
   } as HouseFacts;
+  /** A command schema problem, said once (the voice lane asks for the schemas often). */
+  const schemaProblemsSaid = new Set<string>();
+  const schemaProblem = (p: string): void => {
+    if (schemaProblemsSaid.has(p)) return;
+    schemaProblemsSaid.add(p);
+    opts.log("error", `heuristics.json: ${p}`);
+  };
 
   let journal: Journal | undefined;
   let onPersisted: OnPersisted | undefined;
@@ -682,6 +699,23 @@ export function createHeuristicHost(
       // In the order of the choices, as the instances' own replies list them.
       rows.sort(([a], [b]) => choices.indexOf(a) - choices.indexOf(b));
       return rows.length > 0 ? { choices, rows: rows.map(([, buttons]) => buttons) } : undefined;
+    },
+
+    commandSchemas() {
+      const entries: InstanceSchemas[] = [];
+      for (const { inst } of all()) {
+        if (inst.mode !== "active" || inst.def.commandSchema === undefined) continue;
+        try {
+          // Only the commands it answers to.
+          const own = Object.entries(inst.def.commandSchema(inst.params, liveHouse) as Record<string, CommandSchema>).filter(([c]) => inst.commands.includes(c));
+          entries.push({ key: inst.key, schemas: Object.fromEntries(own) });
+        } catch (err) {
+          schemaProblem(`${inst.key}: commandSchema failed: ${String(err)}`);
+        }
+      }
+      const { schemas, problems } = mergeCommandSchemas(entries);
+      for (const p of problems) schemaProblem(p);
+      return schemas;
     },
 
     cards: () =>
