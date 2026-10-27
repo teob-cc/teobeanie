@@ -149,9 +149,10 @@ bridge are journaled with the Home Assistant user.
 | Option | Meaning |
 |---|---|
 | `llm_provider` | `none` (default), `openrouter`, or `ollama` |
-| `openrouter_api_key` / `openrouter_model` | OpenRouter credentials for the AI copilot |
+| `openrouter_api_key` / `openrouter_model` | OpenRouter credentials, and the model when `voice.json` names none |
 | `ollama_url` | Ollama server URL for local inference |
-| `llm_monthly_budget_usd` | Hard LLM spend cap (spend guard) |
+| `llm_monthly_budget_usd` | Hard LLM spend cap: voice messages and `voice_try` stop when the month's spend reaches it |
+| `stt_url` | Speech to text for voice messages: an OpenAI-compatible transcription server. Empty (the default): the Teobeanie Whisper add-on from this repository ([docs/voice.md](https://github.com/teob-cc/teobeanie/blob/main/docs/voice.md)) |
 | `telegram_bot_token` / `telegram_chat_id` | Optional Telegram notification channel |
 | `telegram_alerts_chat_id` | A second chat for watching the house: notices of instances marked `"alerts": true` in `heuristics.json` go there as well. No commands are taken from it |
 | `telegram_commands` | Take `/commands` from that chat (off by default). A bot has one reader: switch this on only when no other client polls the bot |
@@ -234,8 +235,8 @@ Studio Code Server add-ons.
 
 ## Configuration files
 
-A saved change to `heuristics.json`, `allowlist.json`, `tiles.json`,
-`teobeanie.lock.json` or anything under `heuristics/` and `packages/` is applied
+A saved change to `heuristics.json`, `allowlist.json`, `tiles.json`, `energy.json`,
+`voice.json`, `teobeanie.lock.json` or anything under `heuristics/` and `packages/` is applied
 about a second later, without a restart. **Reload config** on the Heuristics tab
 does the same on demand.
 
