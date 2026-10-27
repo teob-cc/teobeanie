@@ -1,0 +1,22 @@
+name: Teobeanie Whisper
+version: "0.8.0"
+slug: teobeanie_whisper
+description: Speech to text on the Home Assistant host (faster-whisper), for Teobeanie's voice messages
+url: https://github.com/teob-cc/teobeanie
+image: ghcr.io/teob-cc/{arch}-teobeanie-whisper
+arch:
+  - amd64
+  - aarch64
+init: false
+# No port on the host: Teobeanie reaches it on the add-ons' internal network.
+backup_exclude:
+  - "models"
+options:
+  model: small
+  language: ""
+  beam_size: 5
+schema:
+  model: list(tiny|base|small|medium|large-v3-turbo|large-v3)
+  language: str?
+  beam_size: int(1,10)
+  cpu_threads: int(1,64)?

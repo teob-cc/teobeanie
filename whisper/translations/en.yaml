@@ -1,0 +1,13 @@
+configuration:
+  model:
+    name: Model
+    description: The Whisper model, downloaded on first start. Larger models understand more and take longer; small suits a 4-core CPU.
+  language:
+    name: Language
+    description: A language code (ru, en, nl) to skip detection; empty detects it per message.
+  beam_size:
+    name: Beam size
+    description: Decoding breadth; lower is faster, higher is a little more accurate.
+  cpu_threads:
+    name: CPU threads
+    description: Threads for one transcription; default all cores.

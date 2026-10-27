@@ -80,6 +80,63 @@ export interface HouseFacts {
   outdoor?: OutdoorSources;
   /** The house's IANA time zone (HA's configuration, or the time_zone option); absent: UTC (clock.ts houseZone). */
   timeZone?: string;
+  /**
+   * The SafeActuator's bounds: the code's, then the house's own (allowlist.json "bounds"),
+   * which can only narrow them, since every bound that matches must pass.
+   */
+  bounds?: HouseBound[];
+}
+
+/** A service-data field's range for the entities with an id prefix ("climate.", "temperature"). */
+export interface HouseBound {
+  entityPrefix: string;
+  field: string;
+  min: number;
+  max: number;
+}
+
+/** The range every matching bound allows for an entity's field: the narrowest; undefined when none applies. */
+export function boundFor(house: HouseFacts, entity: string, field: string): { min: number; max: number } | undefined {
+  let out: { min: number; max: number } | undefined;
+  for (const b of house.bounds ?? []) {
+    if (b.field !== field || !entity.startsWith(b.entityPrefix)) continue;
+    out = out === undefined ? { min: b.min, max: b.max } : { min: Math.max(out.min, b.min), max: Math.min(out.max, b.max) };
+  }
+  return out;
+}
+
+// ---- typed commands: what a voice (or a form) may fill in ----
+
+/** One argument of a command, in the order the command takes them. */
+export type CommandArgSpec =
+  /** One of a few words: a room, home or away. Instances sharing the command merge their choices. */
+  | { name: string; kind: "choice"; choices: string[]; doc?: string; optional?: boolean }
+  /** A number, sent as written ("21.5"); min and max are what the instance accepts. */
+  | { name: string; kind: "number"; min?: number; max?: number; step?: number; unit?: string; doc?: string; optional?: boolean }
+  /** A duration, sent as "2h" or "90m" (parseDuration); absent: defaultMin. */
+  | { name: string; kind: "duration"; maxMin?: number; defaultMin?: number; doc?: string; optional?: boolean };
+
+/** A command as a typed call: what it does and its arguments. */
+export interface CommandSchema {
+  /** One or two sentences, generic and in English: what the command does. */
+  doc: string;
+  args: CommandArgSpec[];
+}
+
+/** "2h", "90m", "1.5 h", "2" (hours) → ms; anything else (or ≤ 0) → undefined. */
+export function parseDuration(text: string | undefined): number | undefined {
+  const m = text?.trim().toLowerCase().match(/^(\d+(?:[.,]\d+)?)\s*(h|m|min)?$/);
+  if (!m) return undefined;
+  const n = Number(m[1]!.replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return m[2] === "m" || m[2] === "min" ? Math.round(n * 60_000) : Math.round(n * 3_600_000);
+}
+
+/** ms → "2h", "90m", "1h30m": what parseDuration reads back. */
+export function formatDuration(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min % 60 === 0) return `${min / 60}h`;
+  return min > 60 ? `${Math.floor(min / 60)}h${min % 60}m` : `${min}m`;
 }
 
 /** Outdoor conditions now. Undefined where no source gives a value. */
@@ -273,6 +330,12 @@ export interface HeuristicDef<P, S, E extends { tag: string }> {
    * adds "bedroom off" while a waiver runs there.
    */
   commandButtons?(params: P, state: S): Record<string, string[]>;
+  /**
+   * Per command, its arguments typed (see CommandSchema): the voice lane offers a command
+   * to the language model only through this, and checks a call against it before it is
+   * sent. The house's facts give the bounds a number must keep to.
+   */
+  commandSchema?(params: P, house: HouseFacts): Record<string, CommandSchema>;
   /** Reads the outdoor conditions: their entities are watched and read. */
   usesOutdoor?: boolean;
   /** Services nobody may call automatically on these entities — enforced for every instance. */
