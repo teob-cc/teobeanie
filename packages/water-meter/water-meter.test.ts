@@ -163,6 +163,27 @@ describe("shower-summary", () => {
     expect(sim.whys()).toContain("200 L over 25 min: too long for a shower");
   });
 
+  it("a gas price that drops out by the end keeps the last one read", () => {
+    const sim = simulate(showerSummary, p, world, { t0: morning, ...zone }).start();
+    sim.set("binary_sensor.boiler_hot_water", "on");
+    flow(sim, 1000, 8);
+    sim.set("sensor.gas_price", "unavailable");
+    sim.advance(minutes(3));
+    sim.set("sensor.gas_total", "500.200");
+    expect(sim.calls()).toEqual([
+      "notify: Shower over: 64 L water and 0.200 m³ gas in 8 min, €0.32 (water €0.11 at €1.76/m³, gas €0.21 at €1.04/m³)",
+    ]);
+  });
+
+  it("an unknown price is left out, never shown as ?", () => {
+    const sim = simulate(showerSummary, p, { ...world, "sensor.gas_price": "unavailable" }, { t0: morning, ...zone }).start();
+    sim.set("binary_sensor.boiler_hot_water", "on");
+    flow(sim, 1000, 8);
+    sim.advance(minutes(3));
+    sim.set("sensor.gas_total", "500.200");
+    expect(sim.calls()).toEqual(["notify: Shower over: 64 L water and 0.200 m³ gas in 8 min, water €0.11 at €1.76/m³"]);
+  });
+
   it("without a new gas reading, sums up after gasWaitMin with the gas so far", () => {
     const sim = simulate(showerSummary, { ...p, gasPrice: undefined, gasPricePerM3: 1.2 }, world, { t0: morning, ...zone }).start();
     sim.set("binary_sensor.boiler_hot_water", "on");

@@ -127,9 +127,7 @@ export const nightLeak = defineHeuristic<NightLeakParams, NightLeakState, NightL
 
 // ---- shower-summary: a hot-water use, its gas and its cost ----
 
-const SHOWER_TEXT =
-  "Shower over: {litres} L water and {gas} m³ gas in {minutes} min, €{cost} " +
-  "(water €{waterCost} at €{waterPrice}/m³, gas €{gasCost} at €{gasPrice}/m³)";
+const SHOWER_TEXT = "Shower over: {used} in {minutes} min{costs}";
 
 const SHOWER_PARAMS = param.object({
   water: param.entity("sensor").doc("The water meter's total in litres."),
@@ -150,7 +148,10 @@ const SHOWER_PARAMS = param.object({
   text: param
     .text()
     .default(SHOWER_TEXT)
-    .doc("The summary; {litres}, {gas}, {minutes}, {cost}, {waterCost}, {gasCost}, {waterPrice} and {gasPrice} are filled in (? when unknown)."),
+    .doc(
+      "The summary; {used} (\"64 L water and 0.200 m³ gas\") and {costs} (\", €0.32 (water €0.11 at €1.76/m³, gas €0.21 at €1.04/m³)\") hold only what is known, never a ?; " +
+        "{litres}, {gas}, {minutes}, {cost}, {waterCost}, {gasCost}, {waterPrice} and {gasPrice} are filled in too (? when unknown).",
+    ),
 });
 
 export type ShowerSummaryParams = Infer<typeof SHOWER_PARAMS>;
@@ -168,13 +169,13 @@ interface Ended extends Use {
 }
 
 type ShowerEvent =
-  | { tag: "UseStarted"; at: number; startL: number; gasStart: number | null; hot: boolean }
+  | { tag: "UseStarted"; at: number; startL: number; gasStart: number | null; hot: boolean; gasPrice?: number | null }
   | { tag: "HotWater" }
   | { tag: "UseEnded"; at: number; endL: number; litres: number; waitGas: boolean }
   | { tag: "ShowerReported"; litres: number; gasM3: number | null; cost: number | null }
   | { tag: "UseSettled"; reason: string }
   /** The total at start, where the first use counts from. */
-  | { tag: "Baseline"; l: number };
+  | { tag: "Baseline"; l: number; gasPrice?: number | null };
 
 interface ShowerState {
   use: Use | null;
@@ -182,7 +183,18 @@ interface ShowerState {
   ended: Ended | null;
   /** The total when the last use ended: where the next one starts. */
   lastL: number | null;
+  /** The last gas price read (at a use's start): kept for a price that drops out by its end. */
+  gasPrice?: number | null;
 }
+
+/** ", €0.32 (water €0.11 at €1.76/m³, gas €0.21 at €1.04/m³)": only the parts known, empty when none is. */
+const costsText = (waterCost: number | null, gasCost: number | null, cost: number | null, waterPrice: number | null, gasPrice: number | null): string => {
+  const water = waterCost !== null && waterPrice !== null ? `water €${fixed(waterCost, 2)} at €${fixed(waterPrice, 2)}/m³` : null;
+  const gas = gasCost !== null && gasPrice !== null ? `gas €${fixed(gasCost, 2)} at €${fixed(gasPrice, 2)}/m³` : null;
+  if (cost !== null) return `, €${fixed(cost, 2)} (${[water, gas].filter((s) => s !== null).join(", ")})`;
+  const known = [water, gas].filter((s) => s !== null);
+  return known.length === 0 ? "" : `, ${known.join(", ")}`;
+};
 
 const QUIET = "quiet";
 const GAS = "gas";
@@ -216,7 +228,9 @@ export const showerSummary = defineHeuristic<ShowerSummaryParams, ShowerState, S
         const reason = p.hotWater ? `no hot water during ${ended.litres} L` : `${gasM3 ?? "?"} m³ gas with ${ended.litres} L: cold water`;
         return { why: reason, events: [{ tag: "UseSettled", reason }], actions: [] };
       }
-      const gasPrice = (p.gasPrice ? num(p.gasPrice) : null) ?? p.gasPricePerM3 ?? null;
+      // A price that drops out for a while (its integration restarting) keeps the last one read.
+      const priceRead: number | null = p.gasPrice ? (num(p.gasPrice) ?? state.gasPrice ?? null) : null;
+      const gasPrice = priceRead ?? p.gasPricePerM3 ?? null;
       const waterCost = p.waterPricePerM3 !== undefined ? (ended.litres / 1000) * p.waterPricePerM3 : null;
       const gasCost = gasPrice !== null && gasM3 !== null ? gasM3 * gasPrice : null;
       const cost = waterCost !== null && gasCost !== null ? waterCost + gasCost : null;
@@ -230,6 +244,8 @@ export const showerSummary = defineHeuristic<ShowerSummaryParams, ShowerState, S
         gasCost: or(gasCost, 2),
         waterPrice: or(p.waterPricePerM3 ?? null, 2),
         gasPrice: or(gasPrice, 2),
+        used: gasM3 === null ? `${ended.litres} L water` : `${ended.litres} L water and ${fixed(gasM3, 3)} m³ gas`,
+        costs: costsText(waterCost, gasCost, cost, p.waterPricePerM3 ?? null, gasPrice),
       });
       return {
         why: `${ended.litres} L of hot water, ${gasM3 ?? "?"} m³ gas`,
@@ -247,7 +263,14 @@ export const showerSummary = defineHeuristic<ShowerSummaryParams, ShowerState, S
           const v = input.value;
           const step = state.lastL === null ? null : v - state.lastL;
           const startL = step !== null && step >= 0 && step <= MAX_STEP_L ? state.lastL! : v;
-          const started: ShowerEvent = { tag: "UseStarted", at: ctx.now, startL, gasStart: num(p.gas), hot: p.hotWater ? ctx.value(p.hotWater) === true : false };
+          const started: ShowerEvent = {
+            tag: "UseStarted",
+            at: ctx.now,
+            startL,
+            gasStart: num(p.gas),
+            hot: p.hotWater ? ctx.value(p.hotWater) === true : false,
+            ...(p.gasPrice ? { gasPrice: num(p.gasPrice) } : {}),
+          };
           // A new use while the last one waits for its gas: the last one is settled first.
           const before = state.ended !== null ? settle(state.ended) : null;
           return {
@@ -303,7 +326,7 @@ export const showerSummary = defineHeuristic<ShowerSummaryParams, ShowerState, S
       case "start": {
         const v = num(p.water);
         return state.lastL === null && state.use === null && v !== null
-          ? { why: `${p.water} reads ${v} L at start`, events: [{ tag: "Baseline", l: v }] }
+          ? { why: `${p.water} reads ${v} L at start`, events: [{ tag: "Baseline", l: v, ...(p.gasPrice ? { gasPrice: num(p.gasPrice) } : {}) }] }
           : undefined;
       }
       default:
@@ -314,13 +337,14 @@ export const showerSummary = defineHeuristic<ShowerSummaryParams, ShowerState, S
   evolve(state, event) {
     switch (event.tag) {
       case "Baseline":
-        return { ...state, lastL: event.l };
+        return { ...state, lastL: event.l, gasPrice: event.gasPrice ?? state.gasPrice ?? null };
       case "UseStarted":
-        return { ...state, use: { at: event.at, startL: event.startL, gasStart: event.gasStart, hot: event.hot } };
+        return { ...state, use: { at: event.at, startL: event.startL, gasStart: event.gasStart, hot: event.hot }, gasPrice: event.gasPrice ?? state.gasPrice ?? null };
       case "HotWater":
         return state.use === null ? state : { ...state, use: { ...state.use, hot: true } };
       case "UseEnded":
         return {
+          ...state,
           use: null,
           ended: event.waitGas && state.use !== null ? { ...state.use, endedAt: event.at, litres: event.litres } : null,
           lastL: event.endL,
