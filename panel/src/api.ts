@@ -8,6 +8,7 @@ import type { HeuristicInstance } from "./decisions";
 import type { EnergyToday, HouseView } from "../../src/house/view";
 import type { EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons } from "../../src/energy/types";
 import type { InfraView } from "../../src/infra/view";
+import type { CctvView } from "../../src/cctv/view";
 import type { ParamField } from "../../src/kernel/params";
 
 export interface TimelineCard {
@@ -364,6 +365,11 @@ export const api = {
   energy: () => getJson<EnergyOverview>("api/energy"),
   /** The Infra tab: the internet link, the mesh, the network's devices, the tailnet, HA's health. */
   infra: () => getJson<InfraView>("api/infra"),
+  /** The CCTV tab: Frigate's cameras and a page of episodes (older ones: before = the last start, ms). */
+  cctv: (q: { before?: number; camera?: string } = {}) => {
+    const s = qs(q);
+    return getJson<CctvView>(s === "" ? "api/cctv" : `api/cctv?${s}`);
+  },
   /** Days, weeks, months or years from one local date to another (inclusive), oldest first. */
   energyPeriods: (period: EnergyPeriods["period"], from: string, to: string) =>
     getJson<EnergyPeriods>(`api/energy/periods?${qs({ period, from, to })}`),

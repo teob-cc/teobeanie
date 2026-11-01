@@ -153,6 +153,7 @@ bridge are journaled with the Home Assistant user.
 | `ollama_url` | Ollama server URL for local inference |
 | `llm_monthly_budget_usd` | Hard LLM spend cap: voice messages and `voice_try` stop when the month's spend reaches it |
 | `stt_url` | Speech to text for voice messages: an OpenAI-compatible transcription server. Empty (the default): the Teobeanie Whisper add-on from this repository ([docs/voice.md](https://github.com/teob-cc/teobeanie/blob/main/docs/voice.md)) |
+| `frigate_url` | Frigate's internal API (port 5000, no login) for the CCTV tab. Empty (the default): the Frigate add-on is found by itself, or a container named `frigate`. The tab shows once Frigate answers |
 | `telegram_bot_token` / `telegram_chat_id` | Optional Telegram notification channel |
 | `telegram_alerts_chat_id` | A second chat for watching the house: notices of instances marked `"alerts": true` in `heuristics.json` go there as well. No commands are taken from it |
 | `telegram_commands` | Take `/commands` from that chat (off by default). A bot has one reader: switch this on only when no other client polls the bot |

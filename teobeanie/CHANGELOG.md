@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — a CCTV tab
+
+- **CCTV tab.** With Frigate installed, the panel shows each camera now (refreshed while
+  the tab is open, click to enlarge) and the episodes Frigate recorded, newest first and
+  grouped by day, each playable in place; filter by camera, page back with "Older
+  episodes". Teobeanie finds the Frigate add-on itself; the new option `frigate_url`
+  points it elsewhere. Read-only: the browser talks only to Teobeanie.
+- **water-meter 1.1.0: the shower summary tells the gas too** ("64 L water and 0.200 m³
+  gas, €0.32 (water €… at €…/m³, gas €… at €…/m³)"), only what is known, never a `?`;
+  a gas price that is briefly unavailable keeps the last one read.
+
 ## 0.8.2 — upgrading a package
 
 - **`package_install` upgrades.** An installed starter package the add-on ships a newer

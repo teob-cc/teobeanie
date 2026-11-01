@@ -17,6 +17,9 @@ configuration:
   stt_url:
     name: Speech to text URL
     description: Optional. For voice messages (voice.json), an OpenAI-compatible transcription server; empty uses the Teobeanie Whisper add-on from this repository.
+  frigate_url:
+    name: Frigate URL
+    description: Optional. Frigate's internal API for the CCTV tab, e.g. http://ccab4aaf-frigate:5000; empty finds the Frigate add-on by itself.
   telegram_bot_token:
     name: Telegram bot token
     description: Optional. Enables notifications via a Telegram bot.

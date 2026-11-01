@@ -51,6 +51,7 @@ schema:
   ollama_url: url?
   llm_monthly_budget_usd: float?
   stt_url: url?
+  frigate_url: url?
   telegram_bot_token: password?
   telegram_chat_id: str?
   telegram_alerts_chat_id: str?

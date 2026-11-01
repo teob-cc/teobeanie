@@ -1821,3 +1821,120 @@ pre {
     padding: 0.2rem 0.3rem;
   }
 }
+
+/* ---- CCTV tab ---------------------------------------------------------------------- */
+.cctv-live {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+.cctv-cam {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.cctv-cam-big {
+  grid-column: 1 / -1;
+}
+.cctv-cam-frame {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  background: #000;
+  cursor: zoom-in;
+}
+.cctv-cam-big .cctv-cam-frame {
+  cursor: zoom-out;
+}
+.cctv-cam-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.cctv-cam figcaption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+}
+.cctv-cam-name {
+  font-weight: 600;
+  margin-right: auto;
+}
+.cctv-filter .tab.active {
+  border-color: var(--border);
+  color: var(--ink);
+  background: var(--surface);
+}
+.cctv-episodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.cctv-ep {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.cctv-ep-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.35rem 0.6rem 0.35rem 0.35rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cctv-ep-row:hover {
+  background: var(--wash);
+}
+.cctv-thumb {
+  flex: none;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--grid);
+}
+.cctv-ep-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  margin-right: auto;
+}
+.cctv-ep-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.cctv-ep-cam {
+  white-space: nowrap;
+}
+.cctv-video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+}
+@media (max-width: 480px) {
+  .cctv-thumb {
+    width: 72px;
+  }
+}

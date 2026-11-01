@@ -14,6 +14,8 @@ import type { DeviceResolver } from "./devices.js";
 import type { HouseService } from "./house/service.js";
 import type { EnergyService } from "./energy/service.js";
 import type { InfraService } from "./infra/service.js";
+import type { CctvService } from "./cctv/service.js";
+import { mountCctv } from "./cctv/index.js";
 import { mountEnergy } from "./energy/index.js";
 import { mountStudio, type StudioDeps } from "./studio/files.js";
 import { mountReload, type Reloader } from "./reload.js";
@@ -56,6 +58,8 @@ export interface ServerDeps {
   energy?: EnergyService;
   /** The Infra tab: GET api/infra. */
   infra?: InfraService;
+  /** The CCTV tab: GET api/cctv and the pictures and clips it shows, from Frigate. */
+  cctv?: CctvService;
   devices: DeviceResolver;
   studio: StudioDeps;
   /** Config reloads: POST api/reload, the panel's mode changes and instance edits, and the latest outcome with the instances. */
@@ -121,6 +125,7 @@ export function startServer(deps: ServerDeps, port: number): RunningServer {
     const infra = deps.infra;
     app.get("/api/infra", async (c) => c.json(await infra.view()));
   }
+  if (deps.cctv !== undefined) mountCctv(app, deps.cctv);
 
   mountStudio(app, deps.studio);
   if (deps.reload !== undefined) {

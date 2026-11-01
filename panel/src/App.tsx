@@ -12,6 +12,7 @@ import { Heuristics } from "./views/Heuristics";
 import { Connect } from "./views/Connect";
 import { Energy } from "./views/Energy";
 import { Infra } from "./views/Infra";
+import { Cctv } from "./views/Cctv";
 
 // The editor is megabytes: loaded the first time the Studio's Editor tab opens.
 const Studio = lazy(() => import("./views/Studio"));
@@ -22,6 +23,7 @@ const Studio = lazy(() => import("./views/Studio"));
  */
 const VERTICALS = [
   { id: "energy", label: "Energy", View: Energy },
+  { id: "cctv", label: "CCTV", View: Cctv },
   { id: "infra", label: "Infra", View: Infra },
 ] as const satisfies ReadonlyArray<{
   id: string;

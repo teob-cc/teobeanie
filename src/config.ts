@@ -11,6 +11,8 @@ export interface AddonOptions {
   llm_monthly_budget_usd: number;
   /** Speech to text for voice messages (an OpenAI-compatible transcription server); empty: the Teobeanie Whisper add-on. */
   stt_url: string;
+  /** Frigate's internal API (port 5000) for the CCTV tab; empty: found by itself (the Frigate add-on, or a container named frigate). */
+  frigate_url: string;
   telegram_bot_token: string;
   telegram_chat_id: string;
   /** A second chat for watching the house: notices of instances marked "alerts" go there too. */
@@ -54,6 +56,7 @@ const DEFAULT_OPTIONS: AddonOptions = {
   ollama_url: "",
   llm_monthly_budget_usd: 10,
   stt_url: "",
+  frigate_url: "",
   telegram_bot_token: "",
   telegram_chat_id: "",
   telegram_alerts_chat_id: "",

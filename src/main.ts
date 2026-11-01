@@ -44,6 +44,7 @@ import { buildTiles, checkTileCoverage, loadHouseConfig } from "./tiles.js";
 import { createHouseService, type HouseConfig } from "./house/service.js";
 import { createEnergyService } from "./energy/service.js";
 import { createInfraService } from "./infra/service.js";
+import { createCctvService } from "./cctv/service.js";
 import { createEnergyTools } from "./energy/index.js";
 import { loadEnergyFile } from "./energy/file.js";
 import { EMPTY_ENERGY_FILE, type EnergyFile } from "./energy/config.js";
@@ -507,6 +508,8 @@ const houseConfig = (): HouseConfig => ({
 const haRegistry = createHaRegistry({ ha, log: haLog });
 // 9a. Infra tab: the internet link, the mesh, the network's devices, the tailnet, HA's health.
 const infra = createInfraService({ registry: haRegistry, live: () => bridge.liveCache(), cards: () => heuristics.cards(), config: infraConfig });
+// 9b. CCTV tab: the cameras and episodes Frigate keeps, read from its API (frigate_url, else found).
+const cctv = createCctvService({ url: config.options.frigate_url ?? "" });
 const house = createHouseService({
   ha,
   live: () => bridge.liveCache(),
@@ -718,6 +721,7 @@ const server = startServer(
     house,
     energy,
     infra,
+    cctv,
     devices: createDeviceResolver({ wsUrl: config.haWsUrl, token: config.haToken }),
     studio: {
       configDir: config.configDir,
