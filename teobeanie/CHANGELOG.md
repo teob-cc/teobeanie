@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — a CCTV tab
+## 0.8.3 — a CCTV tab
 
 - **CCTV tab.** With Frigate installed, the panel shows each camera now (refreshed while
   the tab is open, click to enlarge) and the episodes Frigate recorded, newest first and
