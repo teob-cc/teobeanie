@@ -3,6 +3,7 @@
 // ranges and durations of the instances that run now), and the check of a call against
 // the same schema before it is sent. Nothing reaches a command that the schema refuses.
 
+import { normalizeHhMm } from "../kernel/clock.js";
 import { formatDuration, type CommandArgSpec, type CommandSchema } from "../kernel/heuristic.js";
 import type { ToolDef } from "./llm.js";
 
@@ -47,6 +48,16 @@ function argSchema(a: CommandArgSpec): Record<string, unknown> {
         .filter(Boolean)
         .join(" ");
       return { type: "integer", description };
+    }
+    case "time": {
+      const description = [
+        doc,
+        "A time of day in the house's zone, as HH:MM on a 24-hour clock. A time said relative to now (in forty minutes) is worked out from the current time.",
+        a.or?.length ? `Or one of: ${a.or.join(", ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return { type: "string", description };
     }
   }
 }
@@ -112,6 +123,14 @@ export function check(s: Surface, input: unknown): Checked {
         if (!isNum(v) || !Number.isInteger(v) || v <= 0) return { ok: false, reason: `${a.name} must be a whole number of minutes` };
         if (a.maxMin !== undefined && v > a.maxMin) return { ok: false, reason: `${a.name} ${v} min is longer than the allowed ${a.maxMin} min` };
         args.push(formatDuration(v * 60_000));
+        break;
+      }
+      case "time": {
+        const said = typeof v === "string" ? v.trim() : "";
+        const word = a.or?.find((w) => w.toLowerCase() === said.toLowerCase());
+        const time = word ?? normalizeHhMm(said);
+        if (time === undefined) return { ok: false, reason: `${a.name} must be a time as HH:MM${a.or?.length ? ` or ${a.or.join(", ")}` : ""} (got ${JSON.stringify(v)})` };
+        args.push(time);
         break;
       }
     }

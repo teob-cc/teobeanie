@@ -127,7 +127,12 @@ export type CommandArgSpec =
       optional?: boolean;
     }
   /** A duration, sent as "2h" or "90m" (parseDuration); absent: defaultMin. */
-  | { name: string; kind: "duration"; maxMin?: number; defaultMin?: number; doc?: string; optional?: boolean };
+  | { name: string; kind: "duration"; maxMin?: number; defaultMin?: number; doc?: string; optional?: boolean }
+  /**
+   * A time of day in the house's zone, sent as "HH:MM" (normalizeHhMm). Which day it means
+   * is the command's to say; `or`: words it may be instead of a time.
+   */
+  | { name: string; kind: "time"; or?: string[]; doc?: string; optional?: boolean };
 
 /** A command as a typed call: what it does and its arguments. */
 export interface CommandSchema {

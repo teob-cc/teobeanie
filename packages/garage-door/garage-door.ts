@@ -136,6 +136,11 @@ export const garageDoor = defineHeuristic<GarageDoorParams, State, Event>({
     [p.commands.close]: "Close the garage door",
     ...(p.autoClose?.keepOpenCommand ? { [p.autoClose.keepOpenCommand]: "Keep the garage door open until it next closes" } : {}),
   }),
+  // What a voice message may run: open and close, not keep-open.
+  commandSchema: (p) => ({
+    [p.commands.open]: { doc: "Open the garage door.", args: [] },
+    [p.commands.close]: { doc: "Close the garage door.", args: [] },
+  }),
   notifyPerHour: 30,
   initial: () => ({}),
 

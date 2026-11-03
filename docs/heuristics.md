@@ -487,8 +487,9 @@ would do) but are not in the menu, as they never reply. A command with arguments
 A heuristic may also type its commands, `commandSchema(params, house)`: per command, a
 line on what it does and its arguments in order, each a `choice` (a few words: a room,
 home or away), a `number` (with `min`, `max`, `step`, a `unit`, and `or`, words it may be
-instead, such as `"off"`) or a `duration` (sent as `2h` or `90m`, read with
-`parseDuration`; `maxMin`, `defaultMin`), any of them `optional`. The climate guard's:
+instead, such as `"off"`), a `duration` (sent as `2h` or `90m`, read with
+`parseDuration`; `maxMin`, `defaultMin`) or a `time` (a time of day in the house's zone,
+sent as `HH:MM`, read with `normalizeHhMm`; `or` as for a number), any of them `optional`. The climate guard's:
 
 ```ts
 { warm: { doc: "Heat a room to a temperature for a while ...", args: [

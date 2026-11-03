@@ -39,8 +39,9 @@ question back.
   privacy mode off in BotFather (then remove it from the group and add it again).
   `telegram_commands` on.
 - **Commands with a schema.** A heuristic offers a command to voice through
-  `commandSchema` (its arguments typed: a choice, a number with its range, a duration).
-  climate-guard's `warm` and `climate_waive` have one; a house package can add its own.
+  `commandSchema` (its arguments typed: a choice, a number with its range, a duration, a time of day).
+  climate-guard's `warm` and `climate_waive` and garage-door's open and close have one; a
+  house package can add its own.
 
 ## voice.json
 

@@ -32,6 +32,10 @@ function mergeArg(a: CommandArgSpec, b: CommandArgSpec): CommandArgSpec {
     const maxMin = a.maxMin === undefined ? b.maxMin : b.maxMin === undefined ? a.maxMin : Math.min(a.maxMin, b.maxMin);
     return { ...a, maxMin };
   }
+  if (a.kind === "time" && b.kind === "time") {
+    const or = a.or === undefined && b.or === undefined ? undefined : [...new Set([...(a.or ?? []), ...(b.or ?? [])])].sort();
+    return { ...a, or };
+  }
   return a;
 }
 

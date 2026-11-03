@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — a time of day in a command; the garage by voice
+
+- **A command argument can be a time of day** (`kind: "time"` in `commandSchema`, with
+  `or` for words it may be instead): the voice lane asks the model for `HH:MM`, works
+  from the house's current time for "in forty minutes", and writes it as the chat would.
+  `normalizeHhMm` reads what people type ("9:15", "09.15").
+- **garage-door 1.1.0: open and close are typed commands**, so `voice.json` can list them.
+  Keep-open stays a typed-in command.
+
 ## 0.8.3 — a CCTV tab
 
 - **CCTV tab.** With Frigate installed, the panel shows each camera now (refreshed while

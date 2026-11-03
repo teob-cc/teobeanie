@@ -27,6 +27,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/shed_open")).toEqual({ name: "shed_open", args: [] });
     expect(parseCommand("/Shed_Open@house_bot  now please")).toEqual({ name: "shed_open", args: ["now", "please"] });
     expect(parseCommand("open the shed")).toBeUndefined();
+    expect(parseCommand("/brew 09:15")).toEqual({ name: "brew", args: ["09:15"] });
     expect(parseCommand(undefined)).toBeUndefined();
   });
 });

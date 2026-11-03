@@ -142,3 +142,15 @@ describe("garage-door's card", () => {
     expect(buttons(sim.card())).toEqual(["Open (off)", "Close (off)", "Keep open (off)"]);
   });
 });
+
+describe("garage-door's typed commands", () => {
+  it("offers open and close to a voice message, without arguments, and not keep-open", () => {
+    const schemas = garageDoor.commandSchema!(
+      { button: "switch.l1", contact: "binary_sensor.door", commands: { open: "garage_open", close: "garage_close" }, autoClose: { presence: "binary_sensor.garage_occupancy", keepOpenCommand: "garage_keep_open" } } as GarageDoorParams,
+      {},
+    );
+    expect(Object.keys(schemas).sort()).toEqual(["garage_close", "garage_open"]);
+    expect(schemas["garage_open"]!.args).toEqual([]);
+    expect(schemas["garage_close"]!.args).toEqual([]);
+  });
+});

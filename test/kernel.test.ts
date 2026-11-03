@@ -378,6 +378,16 @@ describe("command schemas merged over the instances", () => {
     });
   });
 
+  it("a time of day: the words it may be instead add up", () => {
+    const brew = (or: string[]) => ({ doc: "Ready by.", args: [{ name: "time", kind: "time" as const, or }] });
+    const { schemas, problems } = mergeCommandSchemas([
+      { key: "r/a", schemas: { brew: brew(["off"]) } },
+      { key: "r/b", schemas: { brew: brew(["skip", "off"]) } },
+    ]);
+    expect(problems).toEqual([]);
+    expect(schemas["brew"]!.args).toEqual([{ name: "time", kind: "time", or: ["off", "skip"] }]);
+  });
+
   it("an instance that describes the command otherwise is left out of it, as a problem", () => {
     const { schemas, problems } = mergeCommandSchemas([
       { key: "g/a", schemas: { warm: warm("a", 17, 22, 360) } },

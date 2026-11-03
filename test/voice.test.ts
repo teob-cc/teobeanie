@@ -90,6 +90,33 @@ const input = (transcript: string, over: Partial<UnderstandInput> = {}): Underst
   ...over,
 });
 
+describe("a time of day", () => {
+  const SCHEMA: Record<string, CommandSchema> = { brew: { doc: "Have it ready by a time.", args: [{ name: "time", kind: "time", or: ["off"], optional: true, doc: "When." }] } };
+  const brew = surfacesOf(["brew"], SCHEMA).surfaces[0]!;
+
+  it("is a string the model works out from the current time", () => {
+    const arg = (toolOf(brew).parameters as { properties: Record<string, { type: string; description: string }> }).properties["time"]!;
+    expect(arg.type).toBe("string");
+    expect(arg.description).toContain("HH:MM");
+    expect(arg.description).toContain("worked out from the current time");
+    expect(arg.description).toContain("Or one of: off.");
+  });
+
+  it("is written as the chat would type it", () => {
+    expect(check(brew, { time: "09:15" })).toEqual({ ok: true, args: ["09:15"] });
+    expect(check(brew, { time: "9:15" })).toEqual({ ok: true, args: ["09:15"] });
+    expect(check(brew, { time: "09.15" })).toEqual({ ok: true, args: ["09:15"] });
+    expect(check(brew, { time: "OFF" })).toEqual({ ok: true, args: ["off"] });
+    expect(check(brew, {})).toEqual({ ok: true, args: [] });
+  });
+
+  it("refuses what is not a time, with the reason", () => {
+    for (const time of ["25:00", "09:75", "soon", "9", 915]) {
+      expect(check(brew, { time })).toMatchObject({ ok: false, reason: expect.stringContaining("HH:MM or off") });
+    }
+  });
+});
+
 describe("understand", () => {
   it("one message, several commands: each checked, in one turn", async () => {
     const llm = scripted([[["warm", { room: "hall", temperature: 21, duration: 120 }], ["warm", { room: "den", temperature: 20 }], ["warm", { room: "attic", temperature: 20 }]]]);

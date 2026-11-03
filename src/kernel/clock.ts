@@ -40,6 +40,15 @@ export function parseHhMm(s: string): number {
   return h * 60 + m;
 }
 
+/** A time of day as people type it ("9:15", "09.15") → "09:15"; anything else → undefined. */
+export function normalizeHhMm(text: string): string | undefined {
+  const m = /^(\d{1,2})[:.](\d{2})$/.exec(text.trim());
+  if (m === null) return undefined;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  return h <= 23 && mi <= 59 ? `${String(h).padStart(2, "0")}:${m[2]}` : undefined;
+}
+
 const wallFormatters = new Map<string, Intl.DateTimeFormat>();
 
 /** The wall clock in a zone at an instant: date and time of day. */

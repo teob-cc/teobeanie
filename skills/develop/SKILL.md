@@ -166,7 +166,7 @@ the privacy hits to fix first. Never copy a package out of the house any other w
 
 A voice message reaches only the commands `voice.json` lists, and each only through its
 heuristic's `commandSchema`: the arguments typed (a choice, a number with its range, a
-duration). Give a command a schema that is exactly what its `decide` accepts, with the
+duration, a time of day). Give a command a schema that is exactly what its `decide` accepts, with the
 range from the house's bounds (`boundFor(house, entity, field)`), so the check before a
 call and the behaviour agree. Then, with `voice.json` in `shadow`: `voice_try` with the
 phrases people really say and what each must become, until they all pass. Listing a
