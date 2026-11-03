@@ -135,6 +135,49 @@ describe("sensor-light", () => {
     expect(sim.actions().at(-1)!.action).toMatchObject({ service: "light.turn_on", data: { brightness_pct: 15, color_temp_kelvin: 2200 } });
   });
 
+  describe("colors", () => {
+    // t0 = 13:00 in Lagos (UTC+1).
+    const RED = [0.695, 0.302];
+    const lit = {
+      ...hall,
+      level: { brightnessPct: 100 },
+      levels: [{ from: "23:00", to: "07:00", brightnessPct: 5 }],
+      colors: [{ light: "light.hall_lower", xy: RED }],
+    };
+    const dataOf = (sim: ReturnType<typeof simulate>, light: string) =>
+      sim.actions().flatMap((a) => (a.action.kind === "call" && a.action.service === "light.turn_on" && a.action.entities.includes(light) ? [a.action.data] : []));
+
+    it("a light with a colour comes on in it, at every level; the others come on without one", () => {
+      const sim = simulate(sensorLight, lit, quiet, { timeZone: "Africa/Lagos" }).start();
+      sim.set("binary_sensor.hall_upper_motion", "on");
+      expect(dataOf(sim, "light.hall_lower")).toEqual([{ brightness_pct: 100, xy_color: RED }]);
+      expect(dataOf(sim, "light.hall_upper")).toEqual([{ brightness_pct: 100 }]);
+      lightsAre(sim, "on").set("binary_sensor.hall_upper_motion", "off").advance(hours(11));
+      lightsAre(sim, "off").set("binary_sensor.hall_upper_motion", "on"); // 00:00
+      expect(dataOf(sim, "light.hall_lower").at(-1)).toEqual({ brightness_pct: 5, xy_color: RED });
+    });
+
+    it("comes on in its colour after a flash left another in the bulb", () => {
+      const sim = simulate(sensorLight, lit, quiet, { timeZone: "Africa/Lagos" }).start();
+      // Another instance flashes it green from off and puts it off again.
+      sim.set("light.hall_lower", "on", { color_mode: "xy", xy_color: [0.172, 0.747] }).set("light.hall_lower", "off", { color_mode: "xy", xy_color: [0.172, 0.747] });
+      expect(sim.calls()).toEqual([]);
+      sim.set("binary_sensor.hall_lower_motion", "on");
+      expect(dataOf(sim, "light.hall_lower")).toEqual([{ brightness_pct: 100, xy_color: RED }]);
+    });
+
+    it("a light already on keeps the colour it has, and a new level sends nothing", () => {
+      const sim = simulate(sensorLight, lit, { ...quiet, "light.hall_lower": { state: "on", attributes: { color_mode: "xy", xy_color: [0.371, 0.239] } } }, { timeZone: "Africa/Lagos" }).start();
+      sim.set("binary_sensor.hall_upper_motion", "on");
+      expect(dataOf(sim, "light.hall_lower")).toEqual([]);
+      const lit2 = simulate(sensorLight, lit, quiet, { timeZone: "Africa/Lagos" }).start();
+      lit2.set("binary_sensor.hall_lower_motion", "on");
+      lightsAre(lit2, "on");
+      lit2.advance(hours(11)); // 00:00, still someone there
+      expect(dataOf(lit2, "light.hall_lower")).toHaveLength(1);
+    });
+  });
+
   it("keepOnWhile holds the lights on without switching them on", () => {
     const bath = { sensors: ["binary_sensor.bath_motion"], lights: ["light.bath"], offAfterMin: 5, keepOnWhile: { entities: ["binary_sensor.bath_door"], states: ["off"] } };
     const sim = simulate(sensorLight, bath, { "binary_sensor.bath_motion": "off", "binary_sensor.bath_door": "on", "light.bath": "off" }).start();

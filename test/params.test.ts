@@ -48,7 +48,7 @@ describe("parameter schemas", () => {
       "params.everyMin: missing, expected minutes: a number > 0",
     ]);
     expect(validateParams(sensorLight, { ...hall, offAfterMins: 5 })).toEqual([
-      "params.offAfterMins: unknown, expected one of sensors, activeStates, lights, offAfterMin, dark, level, levels, keepOnWhile",
+      "params.offAfterMins: unknown, expected one of sensors, activeStates, lights, offAfterMin, dark, level, levels, colors, keepOnWhile",
     ]);
     expect(validateParams(sensorLight, { ...hall, offAfterMin: "5m" })).toEqual(['params.offAfterMin: expected minutes: a number ≥ 0, got "5m"']);
     expect(validateParams(sensorLight, { ...hall, offAfterMin: -1 })).toEqual(["params.offAfterMin: expected minutes: a number ≥ 0, got -1"]);

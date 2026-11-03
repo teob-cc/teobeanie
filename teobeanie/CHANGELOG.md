@@ -8,6 +8,9 @@
   `normalizeHhMm` reads what people type ("9:15", "09.15").
 - **garage-door 1.1.0: open and close are typed commands**, so `voice.json` can list them.
   Keep-open stays a typed-in command.
+- **sensor-light 1.1.0: `colors` name the colour a light comes on in**, at every level, so
+  a colour another instance left in the bulb is gone at the next switch-on. A light
+  already on keeps the one it has.
 
 ## 0.8.3 — a CCTV tab
 

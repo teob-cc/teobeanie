@@ -15,6 +15,7 @@ Lights on when a sensor sees someone (optionally only when dark, at a level by t
 | `dark.illuminance` | sensor (illuminance) | optional |
 | `dark.tooBright` | binary_sensor (light) | optional |
 | `keepOnWhile.entities` | binary_sensor or input_boolean or media_player or switch | several, optional |
+| `colors[].light` | light | several, optional · A colour lamp that should always come on in one colour. |
 
 ## How it works
 
@@ -27,6 +28,8 @@ people win:
 has been empty for the run-on; one switched off in an empty room comes on again
 at the next visit;
 - a light someone already switched on is left at the brightness they chose;
+- a light listed in `colors` comes on in that colour at every level, whatever colour
+the bulb last had; a light already on keeps the one it has;
 - a light switched on by hand in an empty room goes off after the same run-on;
 - an unavailable sensor is no evidence of an empty room, and with every sensor
 down the lights stay as they are.

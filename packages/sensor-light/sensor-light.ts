@@ -11,6 +11,10 @@
 //   - an unavailable sensor is no evidence of an empty room, and with every sensor
 //     down the lights stay as they are.
 //
+// A colour lamp keeps its colour in the bulb, whatever last set it. Optional colors name
+// the colour a light comes on in, so it comes on as it should at every level, and a
+// light already on is still left as it is.
+//
 // occupancy-light (trigger.ts) is the older, plainer form of this.
 
 import { keep, minutes, param, release, rule, type Desired, type Infer, type World } from "teobeanie";
@@ -40,6 +44,10 @@ const SENSOR_LIGHT_PARAMS = param.object({
     .list(param.object({ ...LEVEL, from: param.time(), to: param.time() }))
     .optional()
     .doc('Other levels by local time ("HH:MM", wrapping midnight); the first that matches wins.'),
+  colors: param
+    .list(param.object({ light: param.entity("light"), xy: param.list(param.number({ min: 0, max: 1 })).doc("CIE [x, y].") }))
+    .optional()
+    .doc("The colour a light comes on in, at every level. Sent when switching it on, not to a light that is already on."),
   keepOnWhile: param
     .object({ entities: param.entities(), states: param.strings().default(["on"]) })
     .optional()
@@ -63,9 +71,11 @@ function isDark({ entity, sun }: World, d: SensorLightParams["dark"]): boolean {
 function onValue({ between }: World, p: SensorLightParams, light: string): Desired {
   if (!light.startsWith("light.")) return "on";
   const level = (p.levels ?? []).find((l) => between(l.from, l.to)) ?? p.level ?? {};
+  const color = p.colors?.find((c) => c.light === light);
   const attrs = {
     ...(level.brightnessPct !== undefined ? { brightness_pct: level.brightnessPct } : {}),
     ...(level.colorTempK !== undefined ? { color_temp_kelvin: level.colorTempK } : {}),
+    ...(color !== undefined ? { xy_color: color.xy } : {}),
   };
   return Object.keys(attrs).length > 0 ? { state: "on", ...attrs } : "on";
 }
