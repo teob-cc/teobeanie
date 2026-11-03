@@ -6,7 +6,7 @@ import type { MCPTool } from "@lambda-house/teob-ts/ai";
 import { addDays, dayKey, isDayKey, type Period } from "./calendar.js";
 import type { EnergyService } from "./service.js";
 import { str, tool } from "../mcp/tools.js";
-import type { Ledger } from "./types.js";
+import type { HeatAtCurrentPrices, Ledger } from "./types.js";
 
 const PERIODS: Period[] = ["day", "week", "month", "year"];
 const isPeriod = (p: unknown): p is Period => PERIODS.includes(p as Period);
@@ -80,12 +80,39 @@ const brief = (l: Ledger) => ({
   ...(l.estimated ? { estimated: true } : {}),
 });
 
+/** A season or the year: the comparison at current prices; without them no euros, only what was. */
+const briefAtCurrent = (l: Ledger, at: HeatAtCurrentPrices | undefined): Record<string, unknown> => {
+  const out: Record<string, unknown> = { ...brief(l) };
+  const h = l.heat;
+  if (h === undefined) return out;
+  const money = (gasCost: number, gasFixed: number, heatPump: number, saving: number) => ({
+    gas_route_eur: Math.round((gasCost + gasFixed) * 100) / 100,
+    of_which_gas_fixed_eur: gasFixed,
+    heat_pump_eur: heatPump,
+    saving_eur: saving,
+  });
+  out.heat_pump_instead = {
+    space_heat_kwh: h.spaceKwh,
+    hot_water_heat_kwh: h.hotWaterKwh,
+    split: h.split,
+    heat_pump_kwh: h.heatPumpKwh,
+    ...(at !== undefined
+      ? {
+          ...money(at.gasCost, at.gasFixed, at.heatPumpCost, at.saving),
+          ...(l.degreeDays !== undefined && l.degreeDays > 0 ? { saving_per_degree_day_eur: Math.round((at.saving / l.degreeDays) * 1000) / 1000 } : {}),
+        }
+      : { no_current_prices: true }),
+    at_past_prices: money(h.gasCost, h.gasFixed, h.heatPumpCost, h.saving),
+  };
+  return out;
+};
+
 export function createEnergyTools(deps: { energy: EnergyService; timeZone: () => string; now?: () => number }): MCPTool[] {
   const now = deps.now ?? Date.now;
   return [
     tool(
       "energy",
-      "The house's energy ledger: euros and quantities (grid import and export, solar, gas, water, each device), from Home Assistant's statistics priced per hour. view \"today\" (default): today so far, projected by its end, the last 7 days, the price curve and the data problems. view \"periods\": one row per day, week, month or year from..to (dates YYYY-MM-DD, house time), with degree days for comparing heating. view \"hours\": one day's hours with their prices. view \"seasons\": the heating seasons (October to April), the last and the current so far, and the last 12 months, with heat_pump_instead: the boiler's heat made by a heat pump, gas disconnected (its fixed charges saved), priced per hour, and the assumptions. Read-only.",
+      "The house's energy ledger: euros and quantities (grid import and export, solar, gas, water, each device), from Home Assistant's statistics priced per hour. view \"today\" (default): today so far, projected by its end, the last 7 days, the price curve and the data problems. view \"periods\": one row per day, week, month or year from..to (dates YYYY-MM-DD, house time), with degree days for comparing heating. view \"hours\": one day's hours with their prices. view \"seasons\": the heating seasons (October to April), the last and the current so far, and the last 12 months, with heat_pump_instead: the boiler's heat made by a heat pump, gas disconnected (its fixed charges saved), both routes at current_prices (the last 7 closed days'), the same at the prices of the time under at_past_prices, and the assumptions. In today and periods, heat_pump_instead is at that period's own prices. Read-only.",
       {
         view: { type: "string", enum: ["today", "periods", "hours", "seasons"] },
         period: { type: "string", enum: PERIODS, description: "for periods; default month" },
@@ -108,8 +135,21 @@ export function createEnergyTools(deps: { energy: EnergyService; timeZone: () =>
         if (view === "seasons") {
           const res = await deps.energy.seasons();
           return {
-            seasons: res.seasons.map((x) => ({ season: x.key, from: x.from, to: x.to, ...brief(x.ledger) })),
-            ...(res.year !== undefined ? { last_12_months: { from: res.year.from, to: res.year.to, ...brief(res.year.ledger) } } : {}),
+            seasons: res.seasons.map((x) => ({ season: x.key, from: x.from, to: x.to, ...briefAtCurrent(x.ledger, x.atCurrentPrices) })),
+            ...(res.year !== undefined ? { last_12_months: { from: res.year.from, to: res.year.to, ...briefAtCurrent(res.year.ledger, res.year.atCurrentPrices) } } : {}),
+            current_prices:
+              res.currentPrices === undefined
+                ? null
+                : {
+                    from: res.currentPrices.from,
+                    to: res.currentPrices.to,
+                    days: res.currentPrices.days,
+                    electricity_eur_per_kwh: res.currentPrices.electricityPerKwh,
+                    gas_eur_per_m3: res.currentPrices.gasPerM3,
+                    gas_fixed_eur_per_day: res.currentPrices.gasFixedPerDay,
+                    estimated_days: res.currentPrices.estimatedDays,
+                    ...(res.currentPrices.widened ? { note: "not simply the last 7 days: some had no gas or no prices" } : {}),
+                  },
             assumptions: res.assumptions,
           };
         }

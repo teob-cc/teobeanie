@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased — a time of day in a command; the garage by voice
+## Unreleased — a time of day in a command; the garage by voice; the heat pump at current prices
+
+- **The heat pump comparison is at current prices.** The "Heat pump instead of gas?" band
+  and the MCP `energy` view `seasons` put both routes at the last 7 closed days' prices,
+  and say which, so the figure no longer reads as last year's market. The prices of the
+  time stay in `ledger.heat` and in the MCP's `at_past_prices`. Nothing is closed again.
 
 - **A command argument can be a time of day** (`kind: "time"` in `commandSchema`, with
   `or` for words it may be instead): the voice lane asks the model for `HH:MM`, works

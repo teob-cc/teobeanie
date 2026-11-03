@@ -67,6 +67,32 @@ export interface HeatLedger {
   saving: number;
 }
 
+/** The prices the heat pump comparison is read at: the latest closed days with gas and priced electricity. */
+export interface CurrentHeatPrices {
+  /** The oldest and the latest day used, YYYY-MM-DD, and how many were used. */
+  from: string;
+  to: string;
+  days: number;
+  /** What the heat pump's electricity cost those days, weighted by its hourly use, €/kWh. */
+  electricityPerKwh: number;
+  /** The gas those days, €/m³, and the gas connection, € a day. */
+  gasPerM3: number;
+  gasFixedPerDay: number;
+  /** Days used with some hour priced from an estimate. */
+  estimatedDays: number;
+  /** Not simply the last 7 days: some had no gas or no prices, so the window reaches further back or holds fewer. */
+  widened: boolean;
+}
+
+/** A period's quantities at current prices, both routes. */
+export interface HeatAtCurrentPrices {
+  gasCost: number;
+  gasFixed: number;
+  heatPumpCost: number;
+  /** gasCost + gasFixed − heatPumpCost. */
+  saving: number;
+}
+
 /** One hour: quantities, the prices it was priced at, and the cost. */
 export interface HourRow {
   start: number;
@@ -159,10 +185,14 @@ export interface EnergySeasons {
     /** The first and the last day, YYYY-MM-DD. */
     from: string;
     to: string;
+    /** `ledger.heat` is the same comparison at the prices of the time: for history, not the verdict. */
     ledger: Ledger;
+    atCurrentPrices?: HeatAtCurrentPrices;
   }>;
   /** The last 365 closed days: the gas connection is paid all year, and hot water heated in summer too. */
-  year?: { from: string; to: string; ledger: Ledger };
+  year?: { from: string; to: string; ledger: Ledger; atCurrentPrices?: HeatAtCurrentPrices };
+  /** The prices `atCurrentPrices` uses; absent when no recent day had gas and priced electricity, and then neither route has a figure. */
+  currentPrices?: CurrentHeatPrices;
   /** The heat pump energy.json assumes. */
   assumptions: { kWhPerM3: number; cop: Array<[number, number]>; hotWaterCop: number; hotWaterM3PerDay: number | null };
 }
