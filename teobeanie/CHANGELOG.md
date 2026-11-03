@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — a time of day in a command; the garage by voice; the heat pump at current prices
+## 0.8.4 — a time of day in a command; the garage by voice; the heat pump at current prices
 
 - **The heat pump comparison is at current prices.** The "Heat pump instead of gas?" band
   and the MCP `energy` view `seasons` put both routes at the last 7 closed days' prices,
