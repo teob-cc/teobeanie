@@ -367,20 +367,34 @@ function DayBand({ o, day, onDay }: { o: EnergyOverview; day: string | null; onD
 function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | null }) {
   const { seasons, state } = useSeasons(enabled, stamp);
   if (seasons === null) return state === "loading" ? null : <Band title="Heat pump instead of gas?"><Unavailable state={state} what="the heating seasons" error={null} /></Band>;
-  const rows = seasons.seasons.map((s) => ({ s, v: seasonVerdict(s.ledger) })).filter((r) => r.v !== null);
+  const prices = seasons.currentPrices;
+  if (prices === undefined) {
+    if (!seasons.seasons.some((s) => s.ledger.heat !== undefined)) return null;
+    return (
+      <Band title="Heat pump instead of gas?">
+        <p className="muted small">No recent day has both gas and electricity prices, so there are no current prices to compare at.</p>
+      </Band>
+    );
+  }
+  const rows = seasons.seasons.map((s) => ({ s, v: seasonVerdict(s.ledger, s.atCurrentPrices) })).filter((r) => r.v !== null);
   if (rows.length === 0) return null;
   const current = rows.at(-1)!;
   // The whole year decides: the gas connection is paid all year, and hot water heated in summer too.
-  const year = seasons.year === undefined ? null : { s: { key: "Last 12 months", from: seasons.year.from, to: seasons.year.to, ledger: seasons.year.ledger }, v: seasonVerdict(seasons.year.ledger) };
+  const year = seasons.year === undefined ? null : { s: { key: "Last 12 months", from: seasons.year.from, to: seasons.year.to, ledger: seasons.year.ledger }, v: seasonVerdict(seasons.year.ledger, seasons.year.atCurrentPrices) };
   const all = year?.v != null && year.s.ledger.days >= 360 ? [...rows, year] : rows;
   const yearly = year?.v != null && year.s.ledger.days >= 360 ? year : null;
-  const line = current.v!.saving >= 0 ? `saves ${fmtEur(current.v!.saving)} this season so far` : `costs ${fmtEur(-current.v!.saving)} more this season so far`;
+  const line = current.v!.saving >= 0 ? `saves ${fmtEur(current.v!.saving)} this season so far, at current prices` : `costs ${fmtEur(-current.v!.saving)} more this season so far, at current prices`;
   const a = seasons.assumptions;
   return (
     <Band title="Heat pump instead of gas?" line={<span className="tnum">{line}</span>}>
       <p className="muted small">
-        The boiler's heat, for the house and for hot water, made by a heat pump instead, each hour at that hour's outdoor temperature and price,
+        The boiler's heat, for the house and for hot water, made by a heat pump instead, each hour at that hour's outdoor temperature,
         with the gas connection gone and its fixed charges saved.
+      </p>
+      <p className="small tnum">
+        Both routes {prices.widened ? `at the prices of the latest ${prices.days === 1 ? "day" : `${prices.days} days`} with gas and prices` : "at the last 7 days' prices"} ({prices.from} to {prices.to}):
+        {" "}electricity {fmtPrice(prices.electricityPerKwh)}, gas {fmtPrice(prices.gasPerM3, "m³")}, gas connection {fmtEur(prices.gasFixedPerDay)} a day.
+        {prices.estimatedDays > 0 && <span className="muted"> {prices.estimatedDays === 1 ? "One of those days" : `${prices.estimatedDays} of those days`} partly priced from an estimate.</span>}
       </p>
       <div className="etable-wrap">
         <table className="etable tnum">
@@ -401,12 +415,11 @@ function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | nu
                 <td>
                   {s.key}
                   {s.ledger.heat!.split !== "measured" && <span className="muted small"> · {s.ledger.heat!.split === "assumed" ? "hot water assumed" : "partly assumed"}</span>}
-                  {s.ledger.estimated && <span className="muted small"> · ≈ prices</span>}
                 </td>
                 <td>{s.ledger.days}</td>
                 <td>{fmtKwh(v!.heatKwh)}</td>
-                <td title={`gas ${fmtEur(s.ledger.heat!.gasCost)} + gas connection ${fmtEur(s.ledger.heat!.gasFixed)}`}>{fmtEur(v!.gasRoute)}</td>
-                <td title={fmtKwh(s.ledger.heat!.heatPumpKwh)}>{fmtEur(v!.heatPump)}</td>
+                <td title={`gas ${fmtEur(v!.gasCost)} + gas connection ${fmtEur(v!.gasFixed)}`}>{fmtEur(v!.gasRoute)}</td>
+                <td title={fmtKwh(v!.heatPumpKwh)}>{fmtEur(v!.heatPump)}</td>
                 <td>{v!.saving >= 0 ? fmtEur(v!.saving) : `costs ${fmtEur(-v!.saving)} more`}</td>
                 <td>{v!.perDegreeDay !== null ? fmtEur(v!.perDegreeDay) : "—"}</td>
               </tr>
@@ -416,7 +429,7 @@ function HeatPumpBand({ enabled, stamp }: { enabled: boolean; stamp: number | nu
       </div>
       {yearly !== null && yearly.v!.saving > 0 && (
         <p className="small tnum">
-          A year like the last 12 months saves {fmtEur(yearly.v!.saving)}: over 10 years {fmtEur(yearly.v!.saving * 10)}, what the heat pump, its
+          A year like the last 12 months, at these prices, saves {fmtEur(yearly.v!.saving)}: over 10 years {fmtEur(yearly.v!.saving * 10)}, what the heat pump, its
           installation and closing the gas connection may cost, less the subsidy, to pay back in that time.
         </p>
       )}

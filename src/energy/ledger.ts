@@ -8,7 +8,7 @@
 // and heating by which of the boiler's states was on when the meter moved. Pure.
 import { daysInYear } from "./calendar.js";
 import { tariffOn, type EnergyFile, type Metered, type PriceSpec, type ResolvedSources } from "./config.js";
-import type { DataFlag, DeviceUse, HeatLedger, HourRow, Ledger } from "./types.js";
+import type { CurrentHeatPrices, DataFlag, DeviceUse, HeatAtCurrentPrices, HeatLedger, HourRow, Ledger } from "./types.js";
 
 /** statistics_during_period, by id: hour start → value. */
 export interface HourlyStats {
@@ -305,6 +305,51 @@ export function heatOf(i: {
     heatPumpCost: round(cost, 2),
     saving: round(saving, 2),
   };
+}
+
+/** How many days current prices are read from, and how far back to look for them when days are unusable. */
+export const CURRENT_PRICE_DAYS = 7;
+export const CURRENT_PRICE_LOOKBACK_DAYS = 60;
+
+/**
+ * The prices of the latest closed days that had gas and priced electricity, newest first
+ * in `days`. A day without either says nothing about prices and is skipped: its cost is 0,
+ * not a price of 0. No such day: undefined, so nobody reads a saving of 0.
+ */
+export function currentHeatPrices(days: Array<{ key: string; ledger: Ledger | undefined }>, kWhPerM3: number): CurrentHeatPrices | undefined {
+  const used: Array<{ key: string; ledger: Ledger; heat: HeatLedger }> = [];
+  for (const { key, ledger } of days) {
+    const heat = ledger?.heat;
+    if (ledger === undefined || heat === undefined || !ledger.complete) continue;
+    if (heat.heatPumpKwh <= 0 || heat.heatPumpCost <= 0 || heat.gasCost <= 0 || heat.spaceKwh + heat.hotWaterKwh <= 0) continue;
+    used.push({ key, ledger, heat });
+    if (used.length === CURRENT_PRICE_DAYS) break;
+  }
+  const latest = used[0];
+  const oldest = used.at(-1);
+  if (latest === undefined || oldest === undefined || kWhPerM3 <= 0) return undefined;
+  const sum = (f: (h: HeatLedger) => number): number => used.reduce((a, u) => a + f(u.heat), 0);
+  const expected = days.slice(0, CURRENT_PRICE_DAYS).map((d) => d.key);
+  return {
+    from: oldest.key,
+    to: latest.key,
+    days: used.length,
+    electricityPerKwh: round(sum((h) => h.heatPumpCost) / sum((h) => h.heatPumpKwh)),
+    gasPerM3: round(sum((h) => h.gasCost) / (sum((h) => h.spaceKwh + h.hotWaterKwh) / kWhPerM3)),
+    gasFixedPerDay: round(sum((h) => h.gasFixed) / used.length),
+    estimatedDays: used.filter((u) => u.ledger.estimated).length,
+    widened: used.length !== expected.length || used.some((u, i) => u.key !== expected[i]),
+  };
+}
+
+/** A period's gas and heat pump electricity, and its days of gas connection, at these prices. */
+export function heatAtPrices(l: Ledger, p: CurrentHeatPrices, kWhPerM3: number): HeatAtCurrentPrices | undefined {
+  const h = l.heat;
+  if (h === undefined || kWhPerM3 <= 0) return undefined;
+  const gasCost = round(((h.spaceKwh + h.hotWaterKwh) / kWhPerM3) * p.gasPerM3, 2);
+  const gasFixed = round(l.days * p.gasFixedPerDay, 2);
+  const heatPumpCost = round(h.heatPumpKwh * p.electricityPerKwh, 2);
+  return { gasCost, gasFixed, heatPumpCost, saving: round(gasCost + gasFixed - heatPumpCost, 2) };
 }
 
 /** max(0, base − the day's mean outdoor temperature), from at least half the day's hourly means. */

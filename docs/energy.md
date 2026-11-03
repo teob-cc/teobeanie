@@ -90,6 +90,19 @@ are: their electricity is in the ledger both ways.
   year and water is heated in summer too;
 - the assumptions.
 
+Both routes are shown at current prices only: the period's quantities (m³ of gas, heat,
+the heat pump's kWh) at the prices of the last 7 closed days (`currentPrices`, computed when
+read, nothing closed again). Electricity is weighted by the heat pump's hourly use, gas is
+per m³, the gas connection is per day. So the figure answers "what would this year's heat
+cost now", and it moves with the market from week to week. Each period's `atCurrentPrices`
+holds the result; `ledger.heat` keeps the same comparison at the prices of the time, and the
+MCP view gives it as `at_past_prices`.
+
+A day without gas or without priced electricity says nothing about prices and is skipped:
+the window then reaches back up to 60 days and says so (`widened`). If no day can be used,
+`currentPrices` is absent and there is no figure, rather than a saving of €0. The `today`
+and `periods` views, and the daily summary, stay at each period's own prices.
+
 The investment is not in it. A yearly saving times the years it should pay back in is
 what the heat pump, its installation and closing the gas connection may cost, less any
 subsidy.

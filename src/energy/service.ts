@@ -16,8 +16,8 @@ import type { SignalStore } from "@lambda-house/teob-ts/ha";
 import { addDays, dayKey, dayStart, daysBetween, isDayKey, nextPeriodFirstDay, periodFirstDay, periodKey, type Period } from "./calendar.js";
 import { hasSources, resolveSources, sourcesView, type EnergyFile, type EnergyPrefs, type PriceSpec, type ResolvedSources } from "./config.js";
 import { LEDGER_ENTITY, PRICES_ENTITY, readStream, type DayClosed, type EnergyEvent, type PricesRecorded } from "./journal.js";
-import { computeDay, gasShares, onSpans, priceBand, projectDay, sumLedgers, type BinaryRow, type HourlyStats, type PriceKnowledge } from "./ledger.js";
-import type { DataFlag, EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons, HourRow, Ledger, PricePoint } from "./types.js";
+import { computeDay, CURRENT_PRICE_LOOKBACK_DAYS, currentHeatPrices, gasShares, heatAtPrices, onSpans, priceBand, projectDay, sumLedgers, type BinaryRow, type HourlyStats, type PriceKnowledge } from "./ledger.js";
+import type { DataFlag, EnergyHours, EnergyOverview, EnergyPeriods, EnergySeasons, HeatAtCurrentPrices, HourRow, Ledger, PricePoint } from "./types.js";
 
 export interface EnergyService {
   overview(): Promise<EnergyOverview>;
@@ -711,7 +711,19 @@ export function createEnergyService(deps: EnergyServiceDeps): EnergyService {
       const s = await sources();
       const hotWaterM3 = await hotWaterPerDay(s).catch(() => undefined);
       const { kWhPerM3, cop, hotWaterCop } = file.heatPump;
-      return { seasons: out, ...(year !== undefined ? { year } : {}), assumptions: { kWhPerM3, cop, hotWaterCop, hotWaterM3PerDay: hotWaterM3 ?? null } };
+      // Read now, from the closed days: nothing is closed again when prices move.
+      const recent = daysBetween(addDays(t, -CURRENT_PRICE_LOOKBACK_DAYS), yTo).reverse().map((key) => ({ key, ledger: closed.get(key)?.ledger }));
+      const currentPrices = currentHeatPrices(recent, kWhPerM3);
+      const at = <T extends { ledger: Ledger }>(x: T): T & { atCurrentPrices?: HeatAtCurrentPrices } => {
+        const priced = currentPrices === undefined ? undefined : heatAtPrices(x.ledger, currentPrices, kWhPerM3);
+        return priced === undefined ? x : { ...x, atCurrentPrices: priced };
+      };
+      return {
+        seasons: out.map(at),
+        ...(year !== undefined ? { year: at(year) } : {}),
+        ...(currentPrices !== undefined ? { currentPrices } : {}),
+        assumptions: { kWhPerM3, cop, hotWaterCop, hotWaterM3PerDay: hotWaterM3 ?? null },
+      };
     },
 
     configure(next) {

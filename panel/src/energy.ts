@@ -3,7 +3,7 @@
 // and the date ranges of each period and of the same periods a year earlier. Pure:
 // views/Energy.tsx and components/EnergyCharts.tsx draw it.
 
-import type { EnergyOverview, Ledger, PricePoint } from "../../src/energy/types";
+import type { EnergyOverview, HeatAtCurrentPrices, Ledger, PricePoint } from "../../src/energy/types";
 
 export type Period = "day" | "week" | "month" | "year";
 
@@ -384,16 +384,21 @@ export function flagLabel(kind: string): string {
 
 // ---- heat pump instead of gas ----
 
-/** A season's verdict: the gas route (gas for heat and hot water, the gas connection) against a heat pump, and per degree day. */
-export function seasonVerdict(l: Ledger): { gasRoute: number; heatPump: number; saving: number; perDegreeDay: number | null; heatKwh: number } | null {
+/** A period's verdict at current prices: the gas route (gas for heat and hot water, the gas connection) against a heat pump, and per degree day. */
+export function seasonVerdict(
+  l: Ledger,
+  at: HeatAtCurrentPrices | undefined,
+): { gasCost: number; gasFixed: number; gasRoute: number; heatPump: number; heatPumpKwh: number; saving: number; perDegreeDay: number | null; heatKwh: number } | null {
   const h = l.heat;
-  if (h === undefined) return null;
-  const gasRoute = h.gasCost + h.gasFixed;
+  if (h === undefined || at === undefined) return null;
   return {
-    gasRoute,
-    heatPump: h.heatPumpCost,
-    saving: h.saving,
-    perDegreeDay: l.degreeDays !== undefined && l.degreeDays > 0 ? h.saving / l.degreeDays : null,
+    gasCost: at.gasCost,
+    gasFixed: at.gasFixed,
+    gasRoute: at.gasCost + at.gasFixed,
+    heatPump: at.heatPumpCost,
+    heatPumpKwh: h.heatPumpKwh,
+    saving: at.saving,
+    perDegreeDay: l.degreeDays !== undefined && l.degreeDays > 0 ? at.saving / l.degreeDays : null,
     heatKwh: h.spaceKwh + h.hotWaterKwh,
   };
 }

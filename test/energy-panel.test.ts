@@ -248,13 +248,16 @@ describe("showers", () => {
 });
 
 describe("heat pump instead of gas", () => {
-  it("weighs the gas route against the heat pump, per degree day", () => {
+  it("weighs the gas route against the heat pump at current prices, per degree day", () => {
     const l = {
       degreeDays: 200,
       heat: { spaceKwh: 9000, hotWaterKwh: 1000, split: "measured", gasCost: 1000, gasFixed: 190, heatPumpKwh: 3000, heatPumpCost: 800, saving: 390 },
     } as unknown as Ledger;
-    expect(seasonVerdict(l)).toEqual({ gasRoute: 1190, heatPump: 800, saving: 390, perDegreeDay: 1.95, heatKwh: 10000 });
-    expect(seasonVerdict({} as Ledger)).toBeNull();
+    const at = { gasCost: 2000, gasFixed: 300, heatPumpCost: 1300, saving: 1000 };
+    expect(seasonVerdict(l, at)).toEqual({ gasCost: 2000, gasFixed: 300, gasRoute: 2300, heatPump: 1300, heatPumpKwh: 3000, saving: 1000, perDegreeDay: 5, heatKwh: 10000 });
+    expect(seasonVerdict({} as Ledger, at)).toBeNull();
+    // No current prices: no verdict, not the prices of the time.
+    expect(seasonVerdict(l, undefined)).toBeNull();
   });
 
   it("says the COP range plainly", () => {

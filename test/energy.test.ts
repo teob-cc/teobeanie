@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { addDays, dayKey, dayStart, daysBetween, nextPeriodFirstDay, periodFirstDay, weekKey } from "../src/energy/calendar.js";
 import { EMPTY_ENERGY_FILE, guessUse, parseEnergyFile, resolveSources, tariffOn, type EnergyPrefs } from "../src/energy/config.js";
-import { computeDay, copAt, gasShares, heatOf, onSpans, priceBand, projectDay, sumLedgers, type HourlyStats, type PriceKnowledge } from "../src/energy/ledger.js";
+import { computeDay, copAt, currentHeatPrices, gasShares, heatAtPrices, heatOf, onSpans, priceBand, projectDay, sumLedgers, type HourlyStats, type PriceKnowledge } from "../src/energy/ledger.js";
 import { DEFAULT_HEAT_PUMP } from "../src/energy/config.js";
 import { createEnergyService } from "../src/energy/service.js";
 import { ENERGY_CATEGORY, type EnergyEvent } from "../src/energy/journal.js";
-import type { HourRow } from "../src/energy/types.js";
+import type { HourRow, Ledger } from "../src/energy/types.js";
 
 const TZ = "Europe/Amsterdam";
 const HOUR = 3_600_000;
@@ -294,6 +294,54 @@ describe("the heat pump route", () => {
   it("checks energy.json's heat pump", () => {
     expect(parseEnergyFile({ heatPump: { cop: [[7, 4], [-7, 2.5]], hotWaterM3PerDay: 0.3 } }).heatPump).toMatchObject({ cop: [[-7, 2.5], [7, 4]], hotWaterM3PerDay: 0.3, kWhPerM3: 8.8 });
     expect(() => parseEnergyFile({ heatPump: { cop: [[7, 0]] } })).toThrow(/above 0/);
+  });
+});
+
+describe("the heat pump route at current prices", () => {
+  const day = (key: string, over: Partial<NonNullable<Ledger["heat"]>> = {}, rest: Partial<Ledger> = {}) => ({
+    key,
+    ledger: {
+      complete: true,
+      estimated: false,
+      days: 1,
+      heat: { spaceKwh: 8, hotWaterKwh: 0.8, split: "measured", gasCost: 2, gasFixed: 1, heatPumpKwh: 2, heatPumpCost: 0.8, saving: 2.2, ...over },
+      ...rest,
+    } as Ledger,
+  });
+  const week = ["2026-11-02", "2026-11-01", "2026-10-31", "2026-10-30", "2026-10-29", "2026-10-28", "2026-10-27"];
+
+  it("weights the electricity by the heat pump's use and the gas by its m³", () => {
+    const days = week.map((k) => day(k));
+    days[0] = day(week[0]!, { spaceKwh: 16, hotWaterKwh: 1.6, gasCost: 6, heatPumpKwh: 6, heatPumpCost: 3 });
+    const p = currentHeatPrices(days, 8.8)!;
+    expect(p).toMatchObject({ from: "2026-10-27", to: "2026-11-02", days: 7, widened: false, estimatedDays: 0, gasFixedPerDay: 1 });
+    // (6 × 0.8 + 3) / (6 × 2 + 6), not the mean of the days' prices.
+    expect(p.electricityPerKwh).toBeCloseTo(7.8 / 18, 4);
+    expect(p.gasPerM3).toBeCloseTo(18 / 8, 4);
+  });
+
+  it("prices a period's quantities, with its days of gas connection", () => {
+    const p = { from: "a", to: "b", days: 7, electricityPerKwh: 0.4, gasPerM3: 2, gasFixedPerDay: 1, estimatedDays: 0, widened: false };
+    const l = { days: 10, heat: { spaceKwh: 800, hotWaterKwh: 80, split: "measured", gasCost: 1, gasFixed: 1, heatPumpKwh: 200, heatPumpCost: 1, saving: 1 } } as Ledger;
+    expect(heatAtPrices(l, p, 8.8)).toEqual({ gasCost: 200, gasFixed: 10, heatPumpCost: 80, saving: 130 });
+    expect(heatAtPrices({ days: 10 } as Ledger, p, 8.8)).toBeUndefined();
+  });
+
+  it("skips a day with no gas or no prices and reaches further back, saying so", () => {
+    const unusable = [
+      day("2026-11-02", { spaceKwh: 0, hotWaterKwh: 0, gasCost: 0, heatPumpKwh: 0, heatPumpCost: 0 }),
+      day("2026-11-01", { heatPumpCost: 0 }),
+      { key: "2026-10-31", ledger: undefined },
+      day("2026-10-30", {}, { complete: false }),
+    ];
+    const p = currentHeatPrices([...unusable, day("2026-10-29", {}, { estimated: true }), day("2026-10-28"), day("2026-10-27"), day("2026-10-26")], 8.8)!;
+    expect(p).toMatchObject({ to: "2026-10-29", from: "2026-10-26", days: 4, widened: true, estimatedDays: 1 });
+    expect(p.electricityPerKwh).toBeCloseTo(0.4, 4);
+  });
+
+  it("has no prices rather than prices of 0 when no day can be used", () => {
+    expect(currentHeatPrices([day("2026-11-02", { gasCost: 0 }), { key: "2026-11-01", ledger: undefined }], 8.8)).toBeUndefined();
+    expect(currentHeatPrices([], 8.8)).toBeUndefined();
   });
 });
 
@@ -637,6 +685,16 @@ describe("createEnergyService", () => {
     // The closed days of the last 365: the 20th to the 22nd.
     expect(res.year).toMatchObject({ from: "2025-10-23", to: "2026-10-22" });
     expect(res.year!.ledger.days).toBe(3);
+    // Both routes at the prices of the closed days, the ledger's own figures kept for history.
+    const prices = res.currentPrices!;
+    expect(prices).toMatchObject({ to: "2026-10-22", days: 3 });
+    expect(prices.widened).toBe(true);
+    const at = res.year!.atCurrentPrices!;
+    const heat = res.year!.ledger.heat!;
+    expect(at.heatPumpCost).toBeCloseTo(heat.heatPumpKwh * prices.electricityPerKwh, 1);
+    expect(at.gasFixed).toBeCloseTo(3 * prices.gasFixedPerDay, 1);
+    expect(at.saving).toBeCloseTo(at.gasCost + at.gasFixed - at.heatPumpCost, 2);
+    expect(season.atCurrentPrices).toBeDefined();
   });
 
   it("keeps the last preferences while HA cannot be asked, and closes nothing again with fewer sources", async () => {
