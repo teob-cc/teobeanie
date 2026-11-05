@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — a failed send says why
+## 0.8.5 — a failed send says why
 
 - **The log says why a send failed.** A failed Telegram poll, notice or voice answer, a
   speech-to-text call and a model call used to say only `fetch failed`. They now add the
