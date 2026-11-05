@@ -7,6 +7,7 @@
 // One message at a time, in the order they came: the host's CPU hears one at a time anyway.
 
 import { ulid } from "@lambda-house/teob-ts/core";
+import { causeOf } from "../kernel/error-cause.js";
 import type { CommandSchema, CommandSource } from "../kernel/heuristic.js";
 import { fill } from "../kernel/heuristic.js";
 import type { VoiceFile } from "./file.js";
@@ -96,7 +97,7 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
     const voiceId = ulid();
     const base = { at: t0, voiceId, by: msg.by, chat: msg.chat, seconds: msg.seconds, mode } as const;
     const finish = async (rest: Partial<Omit<VoiceHandled, "tag">> & { kind: string; calls?: string[] }, answer: string | undefined): Promise<void> => {
-      if (answer !== undefined) await io.reply(answer).catch((err) => d.log("warn", `voice: answer not sent: ${String(err)}`));
+      if (answer !== undefined) await io.reply(answer).catch((err) => d.log("warn", `voice: answer not sent: ${String(err)}${causeOf(err)}`));
       d.record({ ...base, calls: [], ...rest, ...(answer !== undefined ? { reply: answer } : {}), ms: now() - t0 });
     };
 
@@ -112,7 +113,7 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
       transcript = heard.text;
       stt = { ms: heard.ms, ...(heard.model !== undefined ? { model: heard.model } : {}) };
     } catch (err) {
-      d.log("warn", `voice: speech to text failed: ${String(err)}`);
+      d.log("warn", `voice: speech to text failed: ${String(err)}${causeOf(err)}`);
       return finish({ kind: "unavailable", reason: String(err) }, t.unavailable);
     }
     const heardLine = fill(t.heard, { by: msg.by, text: transcript });
@@ -126,7 +127,7 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
     try {
       u = await interpret(file, llm, transcript, msg.by, msg.at);
     } catch (err) {
-      d.log("warn", `voice: the model failed: ${String(err)}`);
+      d.log("warn", `voice: the model failed: ${String(err)}${causeOf(err)}`);
       return finish({ kind: "unavailable", transcript, stt, reason: String(err) }, `${heardLine}\n${t.unavailable}`);
     }
 
@@ -223,7 +224,7 @@ export function createVoiceLane(d: VoiceLaneDeps): VoiceLane {
     enabled: () => d.file().mode !== "off",
     take(msg, io) {
       const run = chain.then(() => handle(msg, io));
-      chain = run.catch((err) => d.log("error", `voice: ${String(err)}`));
+      chain = run.catch((err) => d.log("error", `voice: ${String(err)}${causeOf(err)}`));
       return chain;
     },
   };

@@ -4,6 +4,7 @@
 // heuristic can widen; the house may narrow them (allowlist.json "bounds").
 
 import type { OwnCalls } from "../attribution.js";
+import { causeOf } from "./error-cause.js";
 import type { Action, HouseBound, Json } from "./heuristic.js";
 
 export type Mode = "off" | "shadow" | "active";
@@ -274,13 +275,13 @@ export function createTelegramNotifier(opts: {
       return undefined;
     } catch (err) {
       const first = (err as Error).message ?? String(err);
-      if (retryAfterMs <= 0 || !retriable(first)) return first;
+      if (retryAfterMs <= 0 || !retriable(first)) return `${first}${causeOf(err)}`;
       await sleep(retryAfterMs);
       try {
         await sendTo(chatId, text);
         return undefined;
       } catch (err2) {
-        return `${(err2 as Error).message ?? String(err2)} (also after a retry)`;
+        return `${(err2 as Error).message ?? String(err2)}${causeOf(err2)} (also after a retry)`;
       }
     }
   };

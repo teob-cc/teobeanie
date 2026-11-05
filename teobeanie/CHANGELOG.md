@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — a failed send says why
+
+- **The log says why a send failed.** A failed Telegram poll, notice or voice answer, a
+  speech-to-text call and a model call used to say only `fetch failed`. They now add the
+  reason behind it (DNS, a connection timeout, a reset, each address tried), and so does
+  the notice that a notice could not be sent. A bot token never appears in it. Nothing
+  else changes: what is retried, and when, stays as it was.
+
 ## 0.8.4 — a time of day in a command; the garage by voice; the heat pump at current prices
 
 - **The heat pump comparison is at current prices.** The "Heat pump instead of gas?" band

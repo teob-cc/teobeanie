@@ -16,6 +16,7 @@
 // add-on option telegram_commands is on, at the cut-over from another bot client
 // (Node-RED). Until then Teobeanie sends through the same bot without reading it.
 
+import { causeOf } from "./kernel/error-cause.js";
 import type { CommandSource } from "./kernel/heuristic.js";
 import type { CommandKeyboard, MenuCommand } from "./kernel/host.js";
 import type { VoiceIo, VoiceMessage } from "./voice/lane.js";
@@ -170,7 +171,7 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
         menuDirty = false;
         o.log("info", `telegram: command menu: ${entries.map((c) => "/" + c.command).join(", ") || "none"}`);
       } catch (err) {
-        o.log("warn", `telegram: command menu not set: ${String(err)}; trying again later`);
+        o.log("warn", `telegram: command menu not set: ${String(err)}${causeOf(err)}; trying again later`);
       }
     }));
 
@@ -221,7 +222,7 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
     try {
       await api("answerCallbackQuery", { callback_query_id: q.id });
     } catch (err) {
-      o.log("warn", `telegram: button ${q.data ?? "?"} not run: ${String(err)}`);
+      o.log("warn", `telegram: button ${q.data ?? "?"} not run: ${String(err)}${causeOf(err)}`);
       return;
     }
     const cmd = parseCommand(q.data);
@@ -231,7 +232,7 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
     // The keyboard gives way to what was pressed; the instances reply on their own.
     if (reached.length > 0 && q.message !== undefined) {
       await api("editMessageText", { chat_id: chat.id, message_id: q.message.message_id, text: `/${cmd.name} ${cmd.args.join(" ")} (${from.user ?? "?"})` }).catch((err) =>
-        o.log("warn", `telegram: keyboard not updated: ${String(err)}`),
+        o.log("warn", `telegram: keyboard not updated: ${String(err)}${causeOf(err)}`),
       );
     }
   }
@@ -322,12 +323,12 @@ export function createTelegramReceiver(o: TelegramReceiverOptions): TelegramRece
           try {
             await handle(u);
           } catch (err) {
-            o.log("error", `telegram: update ${u.update_id}: ${String(err)}`);
+            o.log("error", `telegram: update ${u.update_id}: ${String(err)}${causeOf(err)}`);
           }
         }
       } catch (err) {
         if (!running) return;
-        lastError = String(err);
+        lastError = `${String(err)}${causeOf(err)}`;
         o.log("warn", `telegram: ${lastError}; retrying in 10 s`);
         await sleep(10_000);
       }
