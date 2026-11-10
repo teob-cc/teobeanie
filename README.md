@@ -162,7 +162,8 @@ first and reaches `main` last.
    keeps them equal), dates the changelog section, runs the gates, commits on a branch
    `release/v<version>` and pushes that branch and the tag `v<version>`. It never
    touches `main`. `DRY_RUN=1` stops before the push.
-3. The tag run tests and lints, builds the `amd64` and `aarch64` images of both add-ons
+3. Nothing is published by the tag push. Dispatch the workflow on the tag by hand:
+   `gh workflow run build.yml --ref v<version>`. That run tests and lints, builds the `amd64` and `aarch64` images of both add-ons
    (Teobeanie and Teobeanie Whisper, one version) and pushes
    `ghcr.io/teob-cc/{arch}-{teobeanie,teobeanie-whisper}:<version>`, checks that all pull anonymously
    (`scripts/check-images.sh`), and only then fast-forwards `main` to the tag. From that

@@ -1,7 +1,8 @@
 name: CI & add-on images
 
 # Every push / PR: typecheck, tests, add-on lint, image build (no push).
-# A v* tag (on a release/v<version> branch, see README "Releasing"): the same, then push
+# Dispatched by hand on a v* tag (on a release/v<version> branch, see README "Releasing"; a tag push alone
+# publishes nothing): the same, then push
 # ghcr.io/<owner>/{amd64,aarch64}-{teobeanie,teobeanie-whisper}:<version> (the two add-ons
 # release together, at one version), check that all pull anonymously, and
 # only then fast-forward main to the tag. main carries a version only once its image exists,
@@ -14,7 +15,6 @@ name: CI & add-on images
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 

@@ -79,7 +79,8 @@ fi
 cat <<NEXT
 
 Next:
-  1. The tag run (Actions, workflow "CI & add-on images" on $tag) tests, builds amd64 and
+  1. Dispatch the release run by hand (gh workflow run build.yml --ref $tag); a tag push alone publishes nothing.
+     It (Actions, workflow "CI & add-on images" on $tag) tests, builds amd64 and
      aarch64, pushes ghcr.io/teob-cc/{arch}-{teobeanie,teobeanie-whisper}:$version, checks anonymous pulls
      (scripts/check-images.sh $version) and fast-forwards main to $tag.
   2. When it is green, main carries $version and the store offers it. Then: git switch main && git pull --ff-only.
