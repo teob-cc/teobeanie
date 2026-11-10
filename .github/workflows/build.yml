@@ -60,11 +60,12 @@ jobs:
           # Teobeanie builds with the repository root as context; Teobeanie Whisper with its folder.
           - { name: teobeanie, folder: teobeanie, context: . }
           - { name: teobeanie-whisper, folder: whisper, context: whisper }
-        # Both arches build on the same amd64 pool: there is no arm64 self-hosted runner, so the
-        # aarch64 images are built under QEMU emulation (much slower than native).
+        # aarch64 is switched off for now: nothing of ours runs on arm64, and with no arm64 runner it
+        # builds under QEMU emulation, much slower than native. Re-enable the line below before a
+        # release: verify and guard (scripts/check-images.sh) expect both arches of a released version.
         arch:
           - { haarch: amd64, platform: linux/amd64 }
-          - { haarch: aarch64, platform: linux/arm64 }
+          # - { haarch: aarch64, platform: linux/arm64 }
     runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
