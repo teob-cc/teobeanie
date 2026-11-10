@@ -8,6 +8,8 @@ name: CI & add-on images
 # because the add-on store reads config.yaml from main.
 # The tag must equal teobeanie/config.yaml's version: the Supervisor pulls exactly that tag.
 # A push to main also checks that the version it carries has its images (guard).
+# Every job runs on teob-cc's own runners (self-hosted, test-public pool, amd64), never on
+# GitHub-hosted ones.
 
 on:
   push:
@@ -22,7 +24,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -40,7 +42,7 @@ jobs:
       - run: pnpm test
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
       - uses: frenck/action-addon-linter@v2
@@ -58,10 +60,12 @@ jobs:
           # Teobeanie builds with the repository root as context; Teobeanie Whisper with its folder.
           - { name: teobeanie, folder: teobeanie, context: . }
           - { name: teobeanie-whisper, folder: whisper, context: whisper }
+        # Both arches build on the same amd64 pool: there is no arm64 self-hosted runner, so the
+        # aarch64 images are built under QEMU emulation (much slower than native).
         arch:
-          - { haarch: amd64, platform: linux/amd64, runner: ubuntu-latest }
-          - { haarch: aarch64, platform: linux/arm64, runner: ubuntu-24.04-arm }
-    runs-on: ${{ matrix.arch.runner }}
+          - { haarch: amd64, platform: linux/amd64 }
+          - { haarch: aarch64, platform: linux/arm64 }
+    runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
 
@@ -79,6 +83,12 @@ jobs:
 
       - id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.arch.haarch }}-${{ matrix.addon.name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (arm64 emulation)
+        if: matrix.arch.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -109,7 +119,7 @@ jobs:
   verify:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
       - run: scripts/check-images.sh "${GITHUB_REF_NAME#v}"
@@ -120,7 +130,7 @@ jobs:
   promote:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [verify]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, test-public]
     permissions:
       contents: write
     steps:
@@ -140,7 +150,7 @@ jobs:
   # main must never offer an update whose image is missing.
   guard:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, test-public]
     steps:
       - uses: actions/checkout@v4
       - name: main's add-on version has its images
