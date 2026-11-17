@@ -49,13 +49,34 @@ export function mountEnergy(app: Hono, energy: EnergyService): void {
   });
 }
 
+/** € per kWh over a period: what was paid or credited by the kWh it was for; null without any. */
+const perKwh = (eur: number, kwh: number): number | null => (kwh > 0 ? Math.round((eur / kwh) * 10000) / 10000 : null);
+
 /** A ledger as the agent reads it: the money first, devices only where they used something. */
 const brief = (l: Ledger) => ({
   key: l.key,
   complete: l.complete,
   total_eur: l.total,
-  electricity: { import_kwh: l.electricity.importKwh, export_kwh: l.electricity.exportKwh, import_eur: l.electricity.importCost, export_credit_eur: l.electricity.exportCredit },
+  electricity: {
+    import_kwh: l.electricity.importKwh,
+    export_kwh: l.electricity.exportKwh,
+    import_eur: l.electricity.importCost,
+    export_credit_eur: l.electricity.exportCredit,
+    import_eur_per_kwh: perKwh(l.electricity.importCost, l.electricity.importKwh),
+    export_eur_per_kwh: perKwh(l.electricity.exportCredit, l.electricity.exportKwh),
+  },
   solar_kwh: l.solar.kWh,
+  // Absent on a day closed before the ledger valued own use, until it is closed again.
+  ...(l.solar.selfKwh !== undefined
+    ? {
+        solar_self_used: {
+          kwh: l.solar.selfKwh,
+          saved_import_eur: l.solar.selfSaving,
+          eur_per_kwh: perKwh(l.solar.selfSaving, l.solar.selfKwh),
+          more_than_exporting_eur: l.solar.selfOverExport,
+        },
+      }
+    : {}),
   gas: { m3: l.gas.m3, eur: l.gas.cost, ...(l.gas.hotWaterM3 !== undefined ? { hot_water_m3: l.gas.hotWaterM3, heating_m3: l.gas.heatingM3 } : {}) },
   water: { m3: l.water.m3, eur: l.water.cost },
   fixed_eur: l.fixed,
@@ -112,7 +133,7 @@ export function createEnergyTools(deps: { energy: EnergyService; timeZone: () =>
   return [
     tool(
       "energy",
-      "The house's energy ledger: euros and quantities (grid import and export, solar, gas, water, each device), from Home Assistant's statistics priced per hour. view \"today\" (default): today so far, projected by its end, the last 7 days, the price curve and the data problems. view \"periods\": one row per day, week, month or year from..to (dates YYYY-MM-DD, house time), with degree days for comparing heating. view \"hours\": one day's hours with their prices. view \"seasons\": the heating seasons (October to April), the last and the current so far, and the last 12 months, with heat_pump_instead: the boiler's heat made by a heat pump, gas disconnected (its fixed charges saved), both routes at current_prices (the last 7 closed days'), the same at the prices of the time under at_past_prices, and the assumptions. In today and periods, heat_pump_instead is at that period's own prices. Read-only.",
+      "The house's energy ledger: euros and quantities (grid import and export, solar, gas, water, each device), from Home Assistant's statistics priced per hour. solar_self_used is the solar the house used itself (each hour's solar less its export): saved_import_eur is the import it saved at each hour's import price, more_than_exporting_eur what that earned over feeding the same kWh in; neither is part of total_eur. *_eur_per_kwh are the period's average prices. view \"today\" (default): today so far, projected by its end, the last 7 days, the price curve and the data problems. view \"periods\": one row per day, week, month or year from..to (dates YYYY-MM-DD, house time), with degree days for comparing heating. view \"hours\": one day's hours with their prices. view \"seasons\": the heating seasons (October to April), the last and the current so far, and the last 12 months, with heat_pump_instead: the boiler's heat made by a heat pump, gas disconnected (its fixed charges saved), both routes at current_prices (the last 7 closed days'), the same at the prices of the time under at_past_prices, and the assumptions. In today and periods, heat_pump_instead is at that period's own prices. Read-only.",
       {
         view: { type: "string", enum: ["today", "periods", "hours", "seasons"] },
         period: { type: "string", enum: PERIODS, description: "for periods; default month" },

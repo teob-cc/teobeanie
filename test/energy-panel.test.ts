@@ -22,7 +22,9 @@ import {
   localDate,
   mondayOf,
   niceMax,
+  ownSolar,
   perDegreeDay,
+  perKwh,
   periodLabel,
   periodRange,
   periodTitle,
@@ -42,7 +44,7 @@ function ledger(p: Partial<Ledger> = {}): Ledger {
     days: 1,
     complete: false,
     electricity: { importKwh: 10, exportKwh: 4, importCost: 3, exportCredit: 1 },
-    solar: { kWh: 6 },
+    solar: { kWh: 6, selfKwh: 2, selfSaving: 0.6, selfOverExport: 0.1 },
     gas: { m3: 4, cost: 6 },
     water: { m3: 0.2, cost: 0.5 },
     devices: [],
@@ -87,6 +89,15 @@ describe("formatting", () => {
 });
 
 describe("the money split", () => {
+  it("own solar: the kWh used in the house, the import they saved and their average price; nothing without any", () => {
+    expect(ownSolar(ledger())).toEqual({ kWh: 2, saving: 0.6, overExport: 0.1, price: 0.3 });
+    expect(ownSolar(ledger({ solar: { kWh: 6, selfKwh: 0, selfSaving: 0, selfOverExport: 0 } }))).toBeNull();
+    // A day closed before the ledger valued own use.
+    expect(ownSolar(ledger({ solar: { kWh: 6 } as Ledger["solar"] }))).toBeNull();
+    expect(perKwh(3, 10)).toBeCloseTo(0.3);
+    expect(perKwh(0, 0)).toBeNull();
+  });
+
   it("by carrier: electricity is the import less the export credit; the rows add up to the total", () => {
     const l = ledger();
     const rows = byCarrier(l);

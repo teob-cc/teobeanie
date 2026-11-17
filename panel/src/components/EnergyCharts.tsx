@@ -309,6 +309,7 @@ export function HourBars({ hours, timeZone }: { hours: HourRow[]; timeZone: stri
                   <title>
                     {`${t}: ${fmtEur(h.cost)}${h.estimated ? " (price estimated)" : ""} · in ${fmtKwh(h.importKwh)}, out ${fmtKwh(h.exportKwh)}` +
                       (h.solarKwh > 0 ? `, solar ${fmtKwh(h.solarKwh)}` : "") +
+                      ((h.selfKwh ?? 0) > 0 ? ` (${fmtKwh(h.selfKwh)} used here, saved ${fmtEur(h.selfSaving)})` : "") +
                       (h.gasM3 > 0 ? `, gas ${fmtM3(h.gasM3)}` : "") +
                       (h.price !== null ? ` · ${fmtPrice(h.price)}` : "")}
                   </title>

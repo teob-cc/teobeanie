@@ -4,7 +4,8 @@
 // was unavailable for a while) a neighbouring hour's within three hours, else (marked
 // estimated) the price nearest in time. A counter that goes back (a reset, an
 // integration added again) or jumps past what a house can use in an hour is not use:
-// that hour counts 0 and the data band says so. The gas is split between hot water
+// that hour counts 0 and the data band says so. Solar the house used itself (an hour's
+// solar less its export) is valued at the import it saved. The gas is split between hot water
 // and heating by which of the boiler's states was on when the meter moved. Pure.
 import { daysInYear } from "./calendar.js";
 import { tariffOn, type EnergyFile, type Metered, type PriceSpec, type ResolvedSources } from "./config.js";
@@ -132,7 +133,7 @@ export function computeDay(input: DayInput): DayResult {
 
   const rows: HourRow[] = [];
   const devices = new Map<string, { kWh: number; cost: number }>();
-  let importKwh = 0, exportKwh = 0, importCost = 0, exportCredit = 0, solarKwh = 0, gasM3 = 0, gasCost = 0, waterM3 = 0, waterCost = 0;
+  let importKwh = 0, exportKwh = 0, importCost = 0, exportCredit = 0, solarKwh = 0, selfKwh = 0, selfSaving = 0, selfOverExport = 0, gasM3 = 0, gasCost = 0, waterM3 = 0, waterCost = 0;
   const pricedNone = new Set<string>();
   const hourGas: number[] = [];
   const hourPrice: Array<number | null> = [];
@@ -161,6 +162,11 @@ export function computeDay(input: DayInput): DayResult {
     }
     let hSolar = 0;
     for (const id of sources.solar) hSolar += qty(id, hour, "kWh");
+    // What the house used of its own solar is what did not leave: it saved that much import at the
+    // hour's import price, and earned the difference with the export price over feeding it in.
+    const hSelf = Math.max(0, hSolar - hExport);
+    const hSelfSaving = hSelf * (mainPrice ?? 0);
+    const hSelfOverExport = mainPrice === null ? 0 : hSelf * (mainPrice - (rowExportPrice ?? 0));
     let rowGasPrice: number | null = null;
     for (const m of sources.gas) {
       const q = qty(m.id, hour, "m³");
@@ -190,6 +196,8 @@ export function computeDay(input: DayInput): DayResult {
       importKwh: round(hImport),
       exportKwh: round(hExport),
       solarKwh: round(hSolar),
+      selfKwh: round(hSelf),
+      selfSaving: round(hSelfSaving),
       gasM3: round(hGas),
       waterM3: round(hWater),
       price: mainPrice,
@@ -203,6 +211,9 @@ export function computeDay(input: DayInput): DayResult {
     importCost += hImportCost;
     exportCredit += hCredit;
     solarKwh += hSolar;
+    selfKwh += hSelf;
+    selfSaving += hSelfSaving;
+    selfOverExport += hSelfOverExport;
     gasM3 += hGas;
     gasCost += hGasCost;
     waterM3 += hWater;
@@ -232,7 +243,7 @@ export function computeDay(input: DayInput): DayResult {
     days: 1,
     complete: input.complete,
     electricity: { importKwh: round(importKwh), exportKwh: round(exportKwh), importCost: round(importCost, 2), exportCredit: round(exportCredit, 2) },
-    solar: { kWh: round(solarKwh) },
+    solar: { kWh: round(solarKwh), selfKwh: round(selfKwh), selfSaving: round(selfSaving, 2), selfOverExport: round(selfOverExport, 2) },
     gas,
     water: { m3: round(waterM3), cost: round(waterCost, 2) },
     devices: sources.devices.map((d) => ({ id: d.id, name: d.name, use: d.use, kWh: round(devices.get(d.id)?.kWh ?? 0), cost: round(devices.get(d.id)?.cost ?? 0, 2) })),
@@ -375,7 +386,7 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
     days: 0,
     complete: parts.length > 0,
     electricity: { importKwh: 0, exportKwh: 0, importCost: 0, exportCredit: 0 },
-    solar: { kWh: 0 },
+    solar: { kWh: 0, selfKwh: 0, selfSaving: 0, selfOverExport: 0 },
     gas: { m3: 0, cost: 0 },
     water: { m3: 0, cost: 0 },
     devices: [],
@@ -391,6 +402,10 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
     out.electricity.importCost += p.electricity.importCost;
     out.electricity.exportCredit += p.electricity.exportCredit;
     out.solar.kWh += p.solar.kWh;
+    // A day closed before the ledger valued own use has none, until it is closed again.
+    out.solar.selfKwh += p.solar.selfKwh ?? 0;
+    out.solar.selfSaving += p.solar.selfSaving ?? 0;
+    out.solar.selfOverExport += p.solar.selfOverExport ?? 0;
     out.gas.m3 += p.gas.m3;
     out.gas.cost += p.gas.cost;
     if (p.gas.hotWaterM3 !== undefined || p.gas.heatingM3 !== undefined) {
@@ -435,7 +450,7 @@ export function sumLedgers(key: string, from: number, to: number, parts: Ledger[
   const r2 = (n: number) => round(n, 2);
   const r4 = (n: number) => round(n);
   out.electricity = { importKwh: r4(out.electricity.importKwh), exportKwh: r4(out.electricity.exportKwh), importCost: r2(out.electricity.importCost), exportCredit: r2(out.electricity.exportCredit) };
-  out.solar.kWh = r4(out.solar.kWh);
+  out.solar = { kWh: r4(out.solar.kWh), selfKwh: r4(out.solar.selfKwh), selfSaving: r2(out.solar.selfSaving), selfOverExport: r2(out.solar.selfOverExport) };
   out.gas = { m3: r4(out.gas.m3), cost: r2(out.gas.cost), ...(attributed ? { hotWaterM3: r4(hot), heatingM3: r4(heating) } : {}) };
   out.water = { m3: r4(out.water.m3), cost: r2(out.water.cost) };
   out.devices = [...devices.values()].map((d) => ({ ...d, kWh: r4(d.kWh), cost: r2(d.cost) }));

@@ -24,7 +24,7 @@ function ledger(key: string, over: Partial<Ledger> = {}): Ledger {
     days: 1,
     complete: true,
     electricity: { importKwh: 0, exportKwh: 0, importCost: 0, exportCredit: 0 },
-    solar: { kWh: 0 },
+    solar: { kWh: 0, selfKwh: 0, selfSaving: 0, selfOverExport: 0 },
     gas: { m3: 0, cost: 0 },
     water: { m3: 0, cost: 0 },
     devices: [],
@@ -75,7 +75,7 @@ describe("dailySummary", () => {
   it("sums up yesterday's energy with what the ledger knows about it", () => {
     const sunday = ledger("2026-10-25", {
       electricity: { importKwh: 22.4, exportKwh: 3.1, importCost: 5.2, exportCredit: 0.6 },
-      solar: { kWh: 6.25 },
+      solar: { kWh: 6.25, selfKwh: 3.15, selfSaving: 0.82, selfOverExport: 0.06 },
       gas: { m3: 2.31, cost: 4.4, heatingM3: 1.9, hotWaterM3: 0.41 },
       water: { m3: 0.231, cost: 0.41 },
       fixed: 1.19,
@@ -100,6 +100,7 @@ describe("dailySummary", () => {
         "Teobeanie, Mon 26 Oct",
         "Energy Sun 25 Oct: €10.60 (€10.00 a day the 2 days before)",
         "- Electricity: 22 kWh in, 3.1 kWh out, solar 6.3 kWh: €4.60",
+        "- Own solar used: 3.1 kWh, saved €0.82 of import",
         "- Gas: 2.31 m³ (heating 1.90 m³, hot water 0.41 m³): €4.40",
         "- Water: 231 L: €0.41",
         "- Fixed charges: €1.19",

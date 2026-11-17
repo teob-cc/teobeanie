@@ -67,7 +67,7 @@ const SHOWER_CATEGORY = "shower-summary";
 
 const emptyStats = (): HourlyStats => ({ change: new Map(), mean: new Map() });
 /** How the ledger closes a day: a change here closes every day again. */
-const LEDGER_VERSION = 4;
+const LEDGER_VERSION = 5;
 /** What a closed day depends on besides the statistics: the ledger's version, the sources and energy.json. */
 const fingerprintOf = (s: ResolvedSources, file: EnergyFile): string => createHash("sha256").update(JSON.stringify({ v: LEDGER_VERSION, s, file })).digest("hex").slice(0, 16);
 const entityOf = (p: PriceSpec): string | undefined => ("entity" in p ? p.entity : undefined);

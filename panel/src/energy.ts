@@ -72,6 +72,16 @@ export interface MoneyRow {
   detail?: string;
 }
 
+/** A period's average price: the euros by the kWh they were for; null without any. */
+export const perKwh = (eur: number, kWh: number): number | null => (kWh > 0 ? eur / kWh : null);
+
+/** The solar the house used itself and the import it saved; null without any (or on a day closed before the ledger valued it). */
+export function ownSolar(l: Ledger): { kWh: number; saving: number; overExport: number; price: number | null } | null {
+  const kWh = l.solar.selfKwh ?? 0;
+  if (!(kWh > 0)) return null;
+  return { kWh, saving: l.solar.selfSaving, overExport: l.solar.selfOverExport, price: perKwh(l.solar.selfSaving, kWh) };
+}
+
 /** Electricity's import cost less the export credit. */
 export const netElectricity = (l: Ledger): number => l.electricity.importCost - l.electricity.exportCredit;
 

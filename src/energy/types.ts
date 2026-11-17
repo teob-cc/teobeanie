@@ -25,7 +25,15 @@ export interface Ledger {
     /** € credited for the export (net metering: the import price; later, the feed-in price). */
     exportCredit: number;
   };
-  solar: { kWh: number };
+  solar: {
+    kWh: number;
+    /** Solar the house used itself: each hour's solar less that hour's export, kWh. */
+    selfKwh: number;
+    /** € of import it saved: each hour's own use at that hour's import price (the supplier's markup included). Not part of `total`: the import it saved was never bought. */
+    selfSaving: number;
+    /** € it earned over exporting the same kWh: each hour's own use at the import price less the export price. Under net metering, the markup alone. */
+    selfOverExport: number;
+  };
   gas: {
     m3: number;
     cost: number;
@@ -99,6 +107,9 @@ export interface HourRow {
   importKwh: number;
   exportKwh: number;
   solarKwh: number;
+  /** Solar used in the house this hour (solar less export), and the € of import it saved at `price`. */
+  selfKwh: number;
+  selfSaving: number;
   gasM3: number;
   waterM3: number;
   /** €/kWh, €/m³; null: no price known. */
