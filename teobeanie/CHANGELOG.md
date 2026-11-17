@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — what own solar use saved
+
+- **The energy ledger values the solar the house used itself.** Each hour's solar less
+  that hour's export is own use. `solar.selfSaving` is the import it saved, at the hour's
+  import price with the supplier's markup; `solar.selfOverExport` is what that earned over
+  feeding the same kWh in (under net metering, the markup alone). Neither is part of the
+  total: that import was never bought. The Energy tab shows it for today and under each
+  day, week, month and year, with the period's average import and export price; the daily
+  summary has a line for it; the MCP `energy` tool gives `solar_self_used` and
+  `import_eur_per_kwh` / `export_eur_per_kwh` on every row. Every closed day is closed
+  again once, in the background, to get the new figures.
+
 ## 0.8.5 — a failed send says why
 
 - **The log says why a send failed.** A failed Telegram poll, notice or voice answer, a

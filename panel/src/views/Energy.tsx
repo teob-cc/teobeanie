@@ -25,7 +25,9 @@ import {
   fmtPrice,
   fmtQty,
   fmtWhen,
+  ownSolar,
   perDegreeDay,
+  perKwh,
   PERIODS,
   periodTitle,
   priceMarks,
@@ -170,10 +172,13 @@ function MoneyBand({ o, enabled, selectedDay, onDay }: { o: EnergyOverview; enab
           <div className="hfacts small">
             <span>
               import <b className="tnum">{fmtEur(t.electricity.importCost)}</b>
+              <AtPrice eur={t.electricity.importCost} kWh={t.electricity.importKwh} />
             </span>
             <span>
               export <b className="tnum">{fmtEur(-t.electricity.exportCredit)}</b>
+              <AtPrice eur={t.electricity.exportCredit} kWh={t.electricity.exportKwh} />
             </span>
+            <OwnSolar row={t} />
           </div>
         </div>
         <div className="hpanel">
@@ -216,6 +221,28 @@ function MoneyBand({ o, enabled, selectedDay, onDay }: { o: EnergyOverview; enab
   );
 }
 
+/** " at €0.301/kWh": a period's average price, when it had any kWh. */
+function AtPrice({ eur, kWh }: { eur: number; kWh: number }) {
+  const p = perKwh(eur, kWh);
+  return p === null ? null : <span className="muted tnum"> at {fmtPrice(p)}</span>;
+}
+
+/** What the house saved by using its own solar: not a cost, so it stands beside the money, not in it. */
+function OwnSolar({ row }: { row: Ledger }) {
+  const s = ownSolar(row);
+  if (s === null) return null;
+  return (
+    <span title={`${fmtKwh(s.kWh)} of the solar was used in the house, each hour valued at its import price. Over exporting the same kWh it earned ${fmtEur(s.overExport)}. Not part of the total: this import was never bought.`}>
+      own solar saved <b className="tnum">{fmtEur(s.saving)}</b>
+      <span className="muted tnum">
+        {" "}
+        ({fmtKwh(s.kWh)}
+        {s.price !== null ? ` at ${fmtPrice(s.price)}` : ""})
+      </span>
+    </span>
+  );
+}
+
 function PeriodLine({ period, row, earlier }: { period: Period; row: Ledger; earlier: Ledger | undefined }) {
   const pdd = perDegreeDay(row);
   const change = earlier !== undefined && earlier.total > 0 ? (row.total - earlier.total) / earlier.total : null;
@@ -231,6 +258,19 @@ function PeriodLine({ period, row, earlier }: { period: Period; row: Ledger; ear
           {change !== null && row.complete && <span className="muted tnum"> ({change >= 0 ? "+" : "−"}{Math.abs(Math.round(change * 100))}%)</span>}
         </span>
       )}
+      {row.electricity.importKwh > 0 && (
+        <span>
+          import <b className="tnum">{fmtEur(row.electricity.importCost)}</b>
+          <AtPrice eur={row.electricity.importCost} kWh={row.electricity.importKwh} />
+        </span>
+      )}
+      {row.electricity.exportKwh > 0 && (
+        <span>
+          export <b className="tnum">{fmtEur(-row.electricity.exportCredit)}</b>
+          <AtPrice eur={row.electricity.exportCredit} kWh={row.electricity.exportKwh} />
+        </span>
+      )}
+      <OwnSolar row={row} />
       {pdd !== null && (
         <span title={`${fmtQty(row.degreeDays ?? 0, "degree days")}`}>
           <b className="tnum">{fmtEur(pdd)}</b> per degree day

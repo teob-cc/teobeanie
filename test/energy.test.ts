@@ -118,6 +118,38 @@ describe("computeDay", () => {
   const key = "2026-10-23";
   const [h0, h1, h2] = hoursOf(key);
 
+  it("values the solar the house used itself at the import it saved, and over exporting it", () => {
+    const run = (exportPrice: number | "import") => {
+      const file = parseEnergyFile({ tariffs: [{ from: "2026-01-01", importMarkup: 0.02, exportPrice }] });
+      return computeDay({
+        key,
+        from: dayStart(key, TZ),
+        to: dayStart(addDays(key, 1), TZ),
+        hours: [h0!, h1!, h2!],
+        stats: stats(
+          // h0: 2 kWh of solar, 1.5 exported; h1: all of 1 kWh used, and 1 imported; h2: more exported than the solar made.
+          { "sensor.solar_energy": { [h0!]: 2, [h1!]: 1, [h2!]: 0.2 }, "sensor.export_t1": { [h0!]: 1.5, [h2!]: 0.5 }, "sensor.import_t1": { [h1!]: 1 } },
+          { "sensor.price_now": { [h0!]: 0.2, [h1!]: 0.3, [h2!]: 0.4 } },
+        ),
+        sources: resolveSources(PREFS, file),
+        file,
+        known: noKnowledge(),
+        complete: true,
+      });
+    };
+    const fed = run(0.06);
+    // 0.5 kWh at 0.22 and 1 kWh at 0.32 (the markup included); over exporting at 0.06: 0.5 × 0.16 + 1 × 0.26.
+    expect(fed.ledger.solar).toEqual({ kWh: 3.2, selfKwh: 1.5, selfSaving: 0.43, selfOverExport: 0.34 });
+    expect(fed.hours.map((h) => [h.selfKwh, h.selfSaving])).toEqual([[0.5, 0.11], [1, 0.32], [0, 0]]);
+    // The saving is not in the total: that import was never bought.
+    expect(fed.ledger.total).toBe(Math.round((0.32 - 2 * 0.06) * 100) / 100);
+    // Net metering credits the price without the markup: own use earns the markup alone over exporting.
+    expect(run("import").ledger.solar).toMatchObject({ selfKwh: 1.5, selfSaving: 0.43, selfOverExport: 0.03 });
+
+    const legacy = { ...fed.ledger, solar: { kWh: 1 } } as unknown as Ledger;
+    expect(sumLedgers("2026-10", 0, 1, [fed.ledger, fed.ledger, legacy]).solar).toEqual({ kWh: 7.4, selfKwh: 3, selfSaving: 0.86, selfOverExport: 0.68 });
+  });
+
   it("prices each hour at its own price, credits the export and adds the fixed charges", () => {
     const file = parseEnergyFile({ tariffs: [{ from: "2026-01-01", fixedPerDay: { electricity: 1, gas: 0.5 }, taxCreditPerYear: 365 }] });
     const s = resolveSources(PREFS, file);
@@ -389,7 +421,7 @@ describe("sums, the projection and the price band", () => {
 
   it("projects the rest of the day at the last days' hourly use and today's prices", () => {
     const start = dayStart("2026-10-23", TZ);
-    const row = (h: number, importKwh: number): HourRow => ({ start: start + h * HOUR, importKwh, exportKwh: 0, solarKwh: 0, gasM3: 0.1, waterM3: 0, price: 0.2, exportPrice: 0.2, gasPrice: 2, cost: 0, estimated: false });
+    const row = (h: number, importKwh: number): HourRow => ({ start: start + h * HOUR, importKwh, exportKwh: 0, solarKwh: 0, selfKwh: 0, selfSaving: 0, gasM3: 0.1, waterM3: 0, price: 0.2, exportPrice: 0.2, gasPrice: 2, cost: 0, estimated: false });
     const past = [Array.from({ length: 24 }, (_, h) => row(h, 1)), Array.from({ length: 24 }, (_, h) => row(h, 3))];
     const today = { electricity: { importKwh: 0, exportKwh: 0, importCost: 1, exportCredit: 0 }, gas: { m3: 0, cost: 0.5 }, water: { m3: 0, cost: 0 }, fixed: 0.25 } as Parameters<typeof projectDay>[0];
     const p = projectDay(today, [row(0, 0)], [start + 22 * HOUR, start + 23 * HOUR], past, start, () => ({ price: 0.5, exportPrice: null, gasPrice: null }), null);

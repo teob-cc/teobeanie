@@ -21,6 +21,20 @@ gives it to an agent.
      month's mean), marked **estimated**.
 - **Export**: credited at the export price HA's energy dashboard names, unless a tariff
   in `energy.json` says otherwise from a date on (when net metering ends).
+- **Own solar use**: the solar the house used itself is each hour's solar less that hour's
+  export (never below zero). It is valued twice, per hour:
+  - `solar.selfSaving`: the import it saved, at the hour's import price with the supplier's
+    markup. This is what the panels took off the bill through own use.
+  - `solar.selfOverExport`: what using it earned over feeding the same kWh in, the import
+    price less the export price. Under net metering that is the markup alone; once export
+    pays less than import it is most of the saving.
+
+  Neither is part of `total`: the import they speak of was never bought, so the total
+  already is lower by it. A house with a battery reads too high here in the hours the
+  battery discharges into the grid, and too low when it charges from solar: the ledger
+  knows no battery.
+- **Average prices**: a period's import and export € per kWh are its cost and credit by
+  its kWh (the panel and the MCP tool show them; the ledger keeps the sums).
 - **Fixed charges** and the energy tax credit from `energy.json`, per day.
 - **Degree days**: `max(0, base − the day's mean outdoor temperature)`, base 18 °C, from
   the outdoor temperature's hourly means (allowlist.json's `outdoor.temperature`). € and

@@ -71,6 +71,7 @@ function energyLines(o: EnergyOverview, at: number, timeZone: string): string[] 
   if (e.importKwh + e.exportKwh + d.solar.kWh > 0) {
     const parts = [`${kwh(e.importKwh)} in`, ...(e.exportKwh > 0 ? [`${kwh(e.exportKwh)} out`] : []), ...(d.solar.kWh > 0 ? [`solar ${kwh(d.solar.kWh)}`] : [])];
     lines.push(`- Electricity: ${parts.join(", ")}: ${eur(e.importCost - e.exportCredit)}`);
+    if ((d.solar.selfKwh ?? 0) > 0) lines.push(`- Own solar used: ${kwh(d.solar.selfKwh)}, saved ${eur(d.solar.selfSaving)} of import`);
   }
   if (d.gas.m3 > 0) {
     const split = d.gas.heatingM3 !== undefined && d.gas.hotWaterM3 !== undefined ? ` (heating ${m3(d.gas.heatingM3)}, hot water ${m3(d.gas.hotWaterM3)})` : "";
