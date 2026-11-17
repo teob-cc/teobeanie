@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — what own solar use saved
+## 0.8.6 — what own solar use saved
 
 - **The energy ledger values the solar the house used itself.** Each hour's solar less
   that hour's export is own use. `solar.selfSaving` is the import it saved, at the hour's
