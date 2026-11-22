@@ -397,3 +397,112 @@ describe("climate-guard wish", () => {
     expect(sim.actions()).toMatchObject([{ disposition: "refused", reason: "temperature=25 outside 17–22 for climate.bedroom" }]);
   });
 });
+
+// The hold after a person's switch-off: no start for a while. HA dates Teobeanie's own
+// calls to a user too (the Supervisor, as add-ons call it), so its own switch-offs carry one.
+
+const heatingDen = (current: number) => ({ "climate.den_unit": { state: "heat", attributes: { current_temperature: current, temperature: 20 } } });
+const offDen = (current: number) => unit("off", { current_temperature: current, temperature: 20 });
+const modeCalls = (sim: { calls(): string[] }) => sim.calls().filter((c) => c === "climate.set_hvac_mode climate.den_unit");
+
+describe("climate-guard after a person's switch-off", () => {
+  it("heating switched off in a warm room: no cooling for the hold, then the usual start", () => {
+    // A heated room at 26°, switched off from the app: the guard started cooling a second later.
+    const sim = simulate(climateGuard, den, heatingDen(26)).start();
+    sim.set(...offDen(26), { user: "u-alex" });
+    expect(sim.calls()).toEqual([]);
+    expect(sim.journal.map((e) => e.event)).toContainEqual({ tag: "HeldOff", by: "u-alex", until: sim.now + hours(3) });
+    expect(sim.whys().at(-1)).toMatch(/^climate\.den_unit switched off by user u-alex: no start until/);
+    // Still warm, and the unit reports in: nothing.
+    sim.advance(hours(1)).set(...offDen(26.5));
+    sim.advance(hours(2) - minutes(1));
+    expect(sim.calls()).toEqual([]);
+    // The hold runs out: the guard starts as it would have.
+    sim.advance(minutes(1));
+    expect(sim.actions().map((a) => a.action)).toMatchObject([{ data: { hvac_mode: "cool" } }, { data: { temperature: 22 } }]);
+    expect(sim.whys().at(-1)).toMatch(/^hold after the switch-off ran out/);
+    expect(stateOf(sim).heldOff).toBeUndefined();
+  });
+
+  it("someone switching it on ends the hold; switched off again, a new one starts", () => {
+    const sim = simulate(climateGuard, den, heatingDen(26)).start();
+    sim.set(...offDen(26), { user: "u-alex" }).advance(minutes(30));
+    sim.set(...unit("heat", { current_temperature: 26, temperature: 23 }), { user: "u-sam" });
+    // A run as usual: the heating setpoint.
+    expect(sim.calls()).toEqual(["climate.set_temperature climate.den_unit"]);
+    expect(sim.timers["held-off"]).toBeUndefined();
+    expect(sim.journal.map((e) => e.event)).toContainEqual({ tag: "HoldEnded", reason: "climate.den_unit switched to heat by user u-sam" });
+    sim.set(...unit("heat", { current_temperature: 26, temperature: 20 }));
+    sim.advance(minutes(10)).set(...offDen(26), { user: "u-alex" });
+    expect(modeCalls(sim)).toEqual([]);
+    expect(sim.journal.filter((e) => e.event.tag === "HeldOff")).toHaveLength(2);
+    expect(sim.timers["held-off"]?.at).toBe(sim.now + hours(3));
+  });
+
+  it("a cloud unit's late report of the old run does not end the hold", () => {
+    const sim = simulate(climateGuard, den, heatingDen(26)).start();
+    sim.set(...offDen(26), { user: "u-alex" }).advance(seconds(2));
+    sim.set(...unit("heat", { current_temperature: 26, temperature: 20 })); // no user: the cloud catching up
+    sim.advance(seconds(2)).set(...offDen(26));
+    sim.advance(hours(1));
+    expect(modeCalls(sim)).toEqual([]);
+    expect(stateOf(sim).heldOff).toBeDefined();
+  });
+
+  it("its own switch-off at the longest run is no hold: it starts as soon as the room calls for it", () => {
+    const sim = simulate(climateGuard, den, { "climate.den_unit": { state: "heat", attributes: { current_temperature: 18, temperature: 20 } } }).start();
+    sim.advance(hours(3));
+    expect(sim.calls()).toEqual(["climate.set_hvac_mode climate.den_unit"]);
+    sim.set(...unit("off", { current_temperature: 18, temperature: 20 }), { user: "u-supervisor" }).advance(hours(1));
+    sim.set(...unit("off", { current_temperature: 16.9, temperature: 20 }));
+    expect(sim.calls().slice(1)).toEqual(["climate.set_hvac_mode climate.den_unit", "climate.set_temperature climate.den_unit"]);
+    expect(sim.journal.some((e) => e.event.tag === "HeldOff")).toBe(false);
+  });
+
+  it("userOffHours 0 starts at once, as before; without starts there is nothing to hold", () => {
+    const now = simulate(climateGuard, { ...den, userOffHours: 0 }, heatingDen(26)).start();
+    now.set(...offDen(26), { user: "u-alex" });
+    expect(now.actions().map((a) => a.action)).toMatchObject([{ data: { hvac_mode: "cool" } }, { data: { temperature: 22 } }]);
+
+    const { startHeatBelow: _h, startCoolAbove: _c, ...noStarts } = den;
+    const plain = simulate(climateGuard, noStarts, heatingDen(26)).start();
+    plain.set(...offDen(26), { user: "u-alex" });
+    expect(plain.journal.some((e) => e.event.tag === "HeldOff")).toBe(false);
+    expect(plain.timers["held-off"]).toBeUndefined();
+  });
+
+  it("a wish going back to off is the guard's own switch-off: no hold", () => {
+    const sim = simulate(climateGuard, warmBedroom, offBed(), at).start();
+    sim.command("warm", ["bedroom", "21", "1h"], alex);
+    sim.set(...bed("heat", { current_temperature: 18, temperature: 21 })).advance(hours(1));
+    expect(unitCalls(sim).at(-1)).toBe('climate.set_hvac_mode {"hvac_mode":"off"}');
+    sim.set(...bed("off", { current_temperature: 18, temperature: 21 }), { user: "u-supervisor" }).advance(minutes(20));
+    sim.set(...bed("off", { current_temperature: 16.5, temperature: 21 }));
+    expect(unitCalls(sim).slice(-2)).toEqual(['climate.set_hvac_mode {"hvac_mode":"heat"}', 'climate.set_temperature {"temperature":20}']);
+    expect(sim.journal.some((e) => e.event.tag === "HeldOff")).toBe(false);
+  });
+
+  it("stop is a person's switch-off: no start for the hold, even in the cold", () => {
+    const sim = simulate(climateGuard, warmBedroom, heating(20, 18), at).start();
+    sim.command("warm", ["bedroom", "stop"], alex);
+    expect(sim.journal.map((e) => e.event)).toContainEqual({ tag: "HeldOff", by: "alex", until: sim.now + hours(3) });
+    expect(sim.whys().at(-1)).toMatch(/no start until 10:00$/);
+    // Its own off comes back with the Supervisor's user: the hold stays as it was.
+    sim.set(...bed("off", { current_temperature: 18, temperature: 20 }), { user: "u-supervisor" }).advance(hours(1));
+    sim.set(...bed("off", { current_temperature: 16.5, temperature: 20 })).advance(hours(2) - minutes(1));
+    expect(unitCalls(sim)).toEqual(['climate.set_hvac_mode {"hvac_mode":"off"}']);
+    sim.advance(minutes(1));
+    expect(unitCalls(sim).slice(1)).toEqual(['climate.set_hvac_mode {"hvac_mode":"heat"}', 'climate.set_temperature {"temperature":20}']);
+  });
+
+  it("a person switching the unit off ends a wish and starts the hold", () => {
+    const sim = simulate(climateGuard, warmBedroom, offBed(), at).start();
+    sim.command("warm", ["bedroom", "21"], alex);
+    sim.set(...bed("heat", { current_temperature: 18, temperature: 21 })).advance(minutes(30));
+    sim.set(...bed("off", { current_temperature: 16.5, temperature: 21 }), { user: "u-sam" });
+    expect(stateOf(sim).wish).toBeUndefined();
+    expect(stateOf(sim).heldOff).toEqual({ by: "u-sam", until: sim.now + hours(3) });
+    sim.advance(hours(1)).set(...bed("off", { current_temperature: 16, temperature: 21 }));
+    expect(unitCalls(sim).filter((c) => c.includes('"heat"'))).toHaveLength(1);
+  });
+});

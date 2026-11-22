@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **climate-guard 1.3.0: a person's switch-off stands.** A unit someone switches off
+  (from the app, a remote, another automation, or `/warm <room> stop`) is no longer
+  started again at once because the room is above `startCoolAbove` or below
+  `startHeatBelow`: no start for `userOffHours` (new, default 3 h), or until someone
+  switches it on. Setpoints and the longest run still apply meanwhile; the guard's own
+  switch-offs (the longest run, a wish going back to off) do not count;
+  `userOffHours: 0` keeps the old behaviour. A house that installed the starter package
+  keeps its copy: install this one in its place to get it.
+
 ## 0.8.6 — what own solar use saved
 
 - **The energy ledger values the solar the house used itself.** Each hour's solar less
