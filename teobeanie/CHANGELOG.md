@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — no false "another automation" alarm; a switch-off stands
+## 0.8.7 — no false "another automation" alarm; a switch-off stands
 
 - **Teobeanie's own call is recognised when it is seen late.** A service call was matched
   to the request that made it for 5 seconds only. With Home Assistant busy, or Teobeanie
