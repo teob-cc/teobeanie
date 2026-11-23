@@ -84,6 +84,17 @@ describe("own calls", () => {
     expect(own.claim(call({ contextId: "ctx-teob" }))).toBe(true);
   });
 
+  it("an event seen seconds late, HA's answer still out, is Teobeanie's", () => {
+    let t = 0;
+    const own = createOwnCalls(() => t);
+    const settle = own.requested("light", "turn_off", ["light.hall_upper"]);
+    t = 8_000;
+    expect(own.claim(call({ service: "turn_off", contextId: "ctx-late" }))).toBe(true);
+    settle("ctx-late");
+    // Once answered, the same call again is somebody else's unless it carries the context.
+    expect(own.claim(call({ service: "turn_off", contextId: "ctx-other" }))).toBe(false);
+  });
+
   it("a request older than the window no longer matches", () => {
     let t = 0;
     const own = createOwnCalls(() => t);

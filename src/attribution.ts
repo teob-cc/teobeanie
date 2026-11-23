@@ -21,8 +21,13 @@ export const OWN_ORIGIN = "teob";
 /** What ha-audit rows journaled before attribution carry (envelope origin, upcast `by`). */
 export const LEGACY_ORIGIN = "nodered";
 
-/** A request matches a call_service event for at most this long (a hung call is not Teobeanie's forever). */
-export const REQUEST_WINDOW_MS = 5_000;
+/**
+ * A request still waiting for HA's answer matches a call_service event for at most this long
+ * (a hung call is not Teobeanie's forever). The event can be seen seconds after the request:
+ * HA under load, or this process busy while the event waits in the socket. At 5 s such a call
+ * was reported as another automation's; the answer, which ends the wait, comes after the event.
+ */
+export const REQUEST_WINDOW_MS = 60_000;
 /** How long a context id stays Teobeanie's: long enough for a script Teobeanie started to finish. */
 const CONTEXT_TTL_MS = 10 * 60_000;
 const CONTEXT_CAP = 500;

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — no false "another automation" alarm
+
+- **Teobeanie's own call is recognised when it is seen late.** A service call was matched
+  to the request that made it for 5 seconds only. With Home Assistant busy, or Teobeanie
+  itself, the call could be seen later than that and was reported as "Supervisor (a system
+  user) called … Another automation may be working against Teobeanie", although the
+  journal attributed it to the instance. A request now matches for as long as Home
+  Assistant has not answered it, up to a minute.
+
 ## 0.8.6 — what own solar use saved
 
 - **The energy ledger values the solar the house used itself.** Each hour's solar less
