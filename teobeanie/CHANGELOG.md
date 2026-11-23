@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — no false "another automation" alarm
+## Unreleased — no false "another automation" alarm; a switch-off stands
 
 - **Teobeanie's own call is recognised when it is seen late.** A service call was matched
   to the request that made it for 5 seconds only. With Home Assistant busy, or Teobeanie
@@ -8,6 +8,15 @@
   user) called … Another automation may be working against Teobeanie", although the
   journal attributed it to the instance. A request now matches for as long as Home
   Assistant has not answered it, up to a minute.
+
+- **climate-guard 1.3.0: a person's switch-off stands.** A unit someone switches off
+  (from the app, a remote, another automation, or `/warm <room> stop`) is no longer
+  started again at once because the room is above `startCoolAbove` or below
+  `startHeatBelow`: no start for `userOffHours` (new, default 3 h), or until someone
+  switches it on. Setpoints and the longest run still apply meanwhile; the guard's own
+  switch-offs (the longest run, a wish going back to off) do not count;
+  `userOffHours: 0` keeps the old behaviour. A house that installed the starter package
+  keeps its copy: install this one in its place to get it.
 
 ## 0.8.6 — what own solar use saved
 

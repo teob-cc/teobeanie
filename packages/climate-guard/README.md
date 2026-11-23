@@ -6,7 +6,7 @@ One air conditioner or heat pump kept within limits: setpoints per mode, a longe
 
 Setpoints per mode, a longest run, and a start below or above a room temperature; commands lift it for a room, or heat a room to a temperature, for a while.
 
-**Guarantees.** A setpoint a person sets through Home Assistant stands until the next run; no run lasts longer than the longest run; a cloud unit's late report of an old run is not a new run; while a room's waiver runs, the unit is left alone; a wish keeps to the house's bounds and leaves the unit as it found it.
+**Guarantees.** A setpoint a person sets through Home Assistant stands until the next run; a unit a person switches off is not started again for the hold after it, unless someone switches it on; no run lasts longer than the longest run; a cloud unit's late report of an old run is not a new run; while a room's waiver runs, the unit is left alone; a wish keeps to the house's bounds and leaves the unit as it found it.
 
 | Role | Entities | Notes |
 |---|---|---|
@@ -24,7 +24,12 @@ stands until the next run;
 unit that still reports the old run for a while after it was switched off (its
 state catching up) is not a new run, for settleMin;
 - switched off, it starts heating when the room is colder than startHeatBelow, and
-cooling when it is warmer than startCoolAbove.
+cooling when it is warmer than startCoolAbove;
+- but not right after a person (or another automation) switched it off: then no
+start for userOffHours (default 3 h), or until someone switches it on again.
+Setpoints and the longest run still apply meanwhile. The guard's own switch-offs
+(the longest run, a wish going back to off) do not count, nor does the unit's
+own report.
 
 Other modes (dry, fan only, auto) are left alone.
 

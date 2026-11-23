@@ -7,7 +7,12 @@
 //     unit that still reports the old run for a while after it was switched off (its
 //     state catching up) is not a new run, for settleMin;
 //   - switched off, it starts heating when the room is colder than startHeatBelow, and
-//     cooling when it is warmer than startCoolAbove.
+//     cooling when it is warmer than startCoolAbove;
+//   - but not right after a person (or another automation) switched it off: then no
+//     start for userOffHours (default 3 h), or until someone switches it on again.
+//     Setpoints and the longest run still apply meanwhile. The guard's own switch-offs
+//     (the longest run, a wish going back to off) do not count, nor does the unit's
+//     own report.
 //
 // Other modes (dry, fan only, auto) are left alone.
 //
@@ -27,7 +32,8 @@
 // switching the unit off or to another mode ends the wish. A wish and a waiver never run
 // together: either ends the other. Several instances share the command, as the waiver.
 // `/warm bedroom stop` switches the heating off now (and ends a wish or a waiver): the
-// unit stays off until someone starts it, or the guard's start below startHeatBelow does.
+// unit stays off until someone starts it, or, once the hold after a person's switch-off
+// is over, the guard's start below startHeatBelow does.
 // A unit that has no off (a boiler's thermostat) says so, with its lowest setpoint.
 
 import {
@@ -132,6 +138,10 @@ const CLIMATE_GUARD_PARAMS = param.object({
   startHeatBelow: param.number({ unit: "°" }).optional().doc("Switched off: start heating below this room temperature."),
   startCoolAbove: param.number({ unit: "°" }).optional().doc("Switched off: start cooling above this room temperature."),
   temperature: param.entity("sensor", "input_number").optional().doc("A room temperature sensor; default the unit's own current_temperature."),
+  userOffHours: param
+    .duration("h")
+    .default(3)
+    .doc("After a person switches the unit off: no start for this long, hours, or until someone switches it on again; 0 starts at once."),
   graceSec: param.duration("s").default(300).doc("Least time between two setpoint sends while the unit reports back, seconds."),
   settleMin: param
     .duration("min")
@@ -211,7 +221,7 @@ const guard = rule<ClimateGuardParams>(
     title: "Climate guard",
     description: "Setpoints per mode, a longest run, and a start below or above a room temperature; commands lift it for a room, or heat a room to a temperature, for a while.",
     guarantees:
-      "A setpoint a person sets through Home Assistant stands until the next run; no run lasts longer than the longest run; a cloud unit's late report of an old run is not a new run; while a room's waiver runs, the unit is left alone; a wish keeps to the house's bounds and leaves the unit as it found it.",
+      "A setpoint a person sets through Home Assistant stands until the next run; a unit a person switches off is not started again for the hold after it, unless someone switches it on; no run lasts longer than the longest run; a cloud unit's late report of an old run is not a new run; while a room's waiver runs, the unit is left alone; a wish keeps to the house's bounds and leaves the unit as it found it.",
     params: CLIMATE_GUARD_PARAMS,
     watch: (p) => [p.climate, ...(p.temperature !== undefined ? [p.temperature] : [])],
     owns: (p) => [p.climate],
@@ -249,11 +259,25 @@ interface Wish {
   sentAt: number;
 }
 
-/** The rule's state, and the waiver or the wish while one runs. */
-type GuardState = RuleState & { waiver?: Waiver; wish?: Wish };
+/** A person switched the unit off: no start until `until`. */
+interface HeldOff {
+  /** The HA user whose call switched it off, or who asked for it in the chat. */
+  by: string;
+  until: number;
+}
+
+/**
+ * The rule's state, the waiver or the wish while one runs, the hold after a person's
+ * switch-off, and when the guard last switched the unit off itself.
+ */
+type GuardState = RuleState & { waiver?: Waiver; wish?: Wish; heldOff?: HeldOff; ownOffAt?: number };
 export type ClimateGuardState = GuardState;
 
 type GuardEvent =
+  | { tag: "HeldOff"; by: string; until: number }
+  | { tag: "HoldEnded"; reason: string }
+  /** The guard sent the unit off: the "off" that comes back is its own, not a person's. */
+  | { tag: "OwnOff"; at: number }
   | { tag: "Waived"; by: string; until: number }
   | { tag: "WaiverEnded"; reason: string; by?: string }
   | { tag: "Wished"; by: string; target: number; until: number; untilText: string; before: Before; at: number }
@@ -266,6 +290,8 @@ const WAIVER = "waiver";
 const WISH = "wish";
 /** A drift seen within graceSec of the last send: looked at again then. */
 const WISH_CHECK = "wish-check";
+/** The hold after a person's switch-off runs out. */
+const HOLD = "held-off";
 /** What a wish may ask when the house gives no bound: the SafeActuator's own for climate setpoints. */
 const NO_BOUND = { min: 15, max: 27 };
 const textsOf = (p: ClimateGuardParams): ClimateGuardTexts => ({ ...CLIMATE_GUARD_TEXTS, ...p.texts });
@@ -347,26 +373,7 @@ export const climateGuard: HeuristicDef<ClimateGuardParams, GuardState, RuleEven
   },
 
   decide(state, input, ctx) {
-    const p = ctx.params;
-    if (input.kind === "command") {
-      if (p.warm !== undefined && input.command === p.warm.command) return warmCommand(state, input, ctx);
-      return p.waive !== undefined && input.command === p.waive.command ? command(state, input, ctx) : undefined;
-    }
-    const wish = state.wish;
-    if (wish !== undefined) {
-      if (input.kind === "timer" && input.timer === WISH) return endWish(state, ctx, "ran out", { firing: true });
-      // Ran out while the add-on was down; its timer, due already, is cancelled.
-      if (input.kind === "start" && ctx.now >= wish.until) return endWish(state, ctx, "ran out");
-      return holdWish(state, wish, input, ctx);
-    }
-    const w = state.waiver;
-    if (w === undefined) return input.kind === "timer" && (input.timer === WAIVER || input.timer === WISH || input.timer === WISH_CHECK) ? undefined : guard.decide(state, input, ctx);
-    if (input.kind === "timer" && input.timer === WAIVER) return resume(state, ctx, "ran out", { firing: true });
-    // Ran out while the add-on was down; its timer, due already, is cancelled.
-    if (input.kind === "start" && ctx.now >= w.until) return resume(state, ctx, "ran out");
-    // Meanwhile the unit is the people's; said at a start (and on a stray re-evaluation).
-    if (input.kind === "start" || input.kind === "timer") return { why: `waived until ${clock(w.until, ctx)} by ${w.by}: ${p.climate} left alone` };
-    return undefined;
+    return markOwnOff(decideGuard(state, input, ctx), ctx);
   },
 
   evolve(state, event) {
@@ -383,15 +390,130 @@ export const climateGuard: HeuristicDef<ClimateGuardParams, GuardState, RuleEven
       }
       case "WaiverEnded":
       case "WishEnded":
-        // The guard starts over: what it wanted before, and its run tracking, are gone.
+        // The guard starts over: what it wanted before, its run tracking and a hold, are gone.
         return { desired: {}, track: {}, unwatched: state.unwatched ?? [] };
+      case "HeldOff":
+        return { ...state, heldOff: { by: event.by, until: event.until } };
+      case "HoldEnded": {
+        const { heldOff: _, ...rest } = state;
+        return rest;
+      }
+      case "OwnOff":
+        return { ...state, ownOffAt: event.at };
       default: {
         const next = guard.evolve(state, event) as GuardState;
-        return { ...next, ...(state.waiver !== undefined ? { waiver: state.waiver } : {}), ...(state.wish !== undefined ? { wish: state.wish } : {}) };
+        return {
+          ...next,
+          ...(state.waiver !== undefined ? { waiver: state.waiver } : {}),
+          ...(state.wish !== undefined ? { wish: state.wish } : {}),
+          ...(state.heldOff !== undefined ? { heldOff: state.heldOff } : {}),
+          ...(state.ownOffAt !== undefined ? { ownOffAt: state.ownOffAt } : {}),
+        };
       }
     }
   },
 };
+
+/** What the guard decides: a command, the wish or the waiver while one runs, else its rule with the hold. */
+function decideGuard(state: GuardState, input: Input, ctx: DecideCtx<ClimateGuardParams>): GuardDecision | undefined {
+  const p = ctx.params;
+  if (input.kind === "command") {
+    if (p.warm !== undefined && input.command === p.warm.command) return warmCommand(state, input, ctx);
+    return p.waive !== undefined && input.command === p.waive.command ? command(state, input, ctx) : undefined;
+  }
+  const wish = state.wish;
+  if (wish !== undefined) {
+    if (input.kind === "timer" && input.timer === WISH) return endWish(state, ctx, "ran out", { firing: true });
+    // Ran out while the add-on was down; its timer, due already, is cancelled.
+    if (input.kind === "start" && ctx.now >= wish.until) return endWish(state, ctx, "ran out");
+    return holdWish(state, wish, input, ctx);
+  }
+  const w = state.waiver;
+  if (w === undefined) return input.kind === "timer" && (input.timer === WAIVER || input.timer === WISH || input.timer === WISH_CHECK) ? undefined : guarded(state, input, ctx);
+  if (input.kind === "timer" && input.timer === WAIVER) return resume(state, ctx, "ran out", { firing: true });
+  // Ran out while the add-on was down; its timer, due already, is cancelled.
+  if (input.kind === "start" && ctx.now >= w.until) return resume(state, ctx, "ran out");
+  // Meanwhile the unit is the people's; said at a start (and on a stray re-evaluation).
+  if (input.kind === "start" || (input.kind === "timer" && input.timer !== HOLD)) return { why: `waived until ${clock(w.until, ctx)} by ${w.by}: ${p.climate} left alone` };
+  return undefined;
+}
+
+// ---- the hold after a person's switch-off ----
+
+/** Whether a decision sends the unit off. */
+const sendsOff = (d: GuardDecision | undefined, climate: string): boolean =>
+  d?.actions?.some((a) => a.kind === "call" && a.service === "climate.set_hvac_mode" && a.entities.includes(climate) && a.data?.["hvac_mode"] === "off") === true;
+
+/** A decision that sends the unit off notes when, so the "off" that comes back is not taken for a person's. */
+function markOwnOff(d: GuardDecision | undefined, ctx: DecideCtx<ClimateGuardParams>): GuardDecision | undefined {
+  if (!sendsOff(d, ctx.params.climate)) return d;
+  return { ...d, events: [...(d!.events ?? []), { tag: "OwnOff", at: ctx.now }] };
+}
+
+/** Holds are on: a hold length, and a start that it holds back. */
+const holds = (p: ClimateGuardParams): boolean => (p.userOffHours ?? 3) > 0 && (p.startHeatBelow !== undefined || p.startCoolAbove !== undefined);
+
+/** A new hold by `by` from now: its event and its timer. */
+function hold(ctx: DecideCtx<ClimateGuardParams>, by: string): { event: GuardEvent; timer: ReturnType<typeof setTimer>; until: number } {
+  const until = ctx.now + hours(ctx.params.userOffHours ?? 3);
+  return { event: { tag: "HeldOff", by, until }, timer: setTimer(HOLD, until), until };
+}
+
+/**
+ * The HA user who just switched the unit off, when that starts a hold; else undefined.
+ * HA dates the guard's own calls to a user too (the Supervisor, as add-ons call it): an
+ * off the guard wants or sent within graceSec is its own.
+ */
+function switchedOffBy(state: GuardState, input: Input, ctx: DecideCtx<ClimateGuardParams>): string | undefined {
+  const p = ctx.params;
+  if (!holds(p)) return undefined;
+  if (input.kind !== "signal" || input.entity !== p.climate || input.state !== "off" || input.user === undefined) return undefined;
+  if (state.desired[p.climate] === "off") return undefined;
+  if (state.ownOffAt !== undefined && ctx.now - state.ownOffAt < (p.graceSec ?? 300) * 1000) return undefined;
+  return input.user;
+}
+
+/** The params without starts: what the guard runs on while a hold lasts. */
+function withoutStarts(p: ClimateGuardParams): ClimateGuardParams {
+  const { startHeatBelow: _heat, startCoolAbove: _cool, ...rest } = p;
+  return rest;
+}
+
+/**
+ * The guard outside a wish and a waiver. A person's switch-off starts a hold: setpoints
+ * and the longest run still apply, but nothing starts the unit. The hold ends when it
+ * runs out or someone switches the unit on; then the guard decides as usual. A run the
+ * unit reports by itself (a cloud's late report) does not end it.
+ */
+function guarded(state: GuardState, input: Input, ctx: DecideCtx<ClimateGuardParams>): GuardDecision | undefined {
+  const p = ctx.params;
+  const h = state.heldOff;
+  if (h === undefined) {
+    if (input.kind === "timer" && input.timer === HOLD) return undefined;
+    const by = switchedOffBy(state, input, ctx);
+    if (by === undefined) return guard.decide(state, input, ctx);
+    const n = hold(ctx, by);
+    const d = guard.decide(state, input, { ...ctx, params: withoutStarts(p) }) as Decision<RuleEvent> | undefined;
+    return {
+      why: `${p.climate} switched off by user ${by}: no start until ${clock(n.until, ctx)}${d?.why !== undefined ? ` · ${d.why}` : ""}`,
+      events: [n.event, ...(d?.events ?? [])],
+      actions: d?.actions ?? [],
+      timers: [n.timer, ...(d?.timers ?? [])],
+    };
+  }
+  const firing = input.kind === "timer" && input.timer === HOLD;
+  const switchedOn = input.kind === "signal" && input.entity === p.climate && input.user !== undefined && (input.state === "heat" || input.state === "cool");
+  if (!firing && !switchedOn && ctx.now < h.until) return guard.decide(state, input, { ...ctx, params: withoutStarts(p) });
+  // Over: ran out (or did while the add-on was down), or someone switched the unit on.
+  const reason = switchedOn && ctx.now < h.until ? `${p.climate} switched to ${input.state} by user ${input.user}` : "ran out";
+  const d = guard.decide(state, input, ctx) as Decision<RuleEvent> | undefined;
+  return {
+    why: `hold after the switch-off ${reason}${d?.why !== undefined ? ` · ${d.why}` : ""}`,
+    events: [{ tag: "HoldEnded", reason }, ...(d?.events ?? [])],
+    actions: d?.actions ?? [],
+    timers: [...(!firing && ctx.timer(HOLD) !== undefined ? [cancelTimer(HOLD)] : []), ...(d?.timers ?? [])],
+  };
+}
 
 type CommandInput = Extract<Input, { kind: "command" }>;
 
@@ -537,15 +659,27 @@ function stop(state: GuardState, ctx: DecideCtx<ClimateGuardParams>, by: string,
   if (Array.isArray(modes) && !modes.includes("off")) return reply(fill(t.cannotStop, { room, min: rangeOf(ctx, p.climate).min }));
   const endsWish = state.wish !== undefined;
   const endsWaiver = state.waiver !== undefined;
-  if (unit.state === "off" && !endsWish && !endsWaiver) return reply(fill(t.alreadyOff, { room }));
+  // A person asking for off: no start for the hold after it, as when they switch it off in HA.
+  const h = holds(p) ? hold(ctx, by) : undefined;
+  const held = h !== undefined ? `; no start until ${clock(h.until, ctx)}` : "";
+  if (unit.state === "off" && !endsWish && !endsWaiver) {
+    return reply(fill(t.alreadyOff, { room }), {
+      why: `${p.warm!.command} stop by ${by}: ${p.climate} is off already${held}`,
+      ...(h !== undefined ? { events: [h.event], timers: [h.timer, ...(ctx.timer(EVAL) !== undefined ? [cancelTimer(EVAL)] : [])] } : {}),
+    });
+  }
   return reply(fill(t.stopped, { room }), {
-    why: `${p.warm!.command} stop by ${by}: ${p.climate} switched off${endsWish ? "; the wish ends" : ""}${endsWaiver ? "; the waiver ends" : ""}`,
+    why: `${p.warm!.command} stop by ${by}: ${p.climate} switched off${endsWish ? "; the wish ends" : ""}${endsWaiver ? "; the waiver ends" : ""}${held}`,
     events: [
       ...(endsWish ? [{ tag: "WishEnded" as const, reason: `switched off by ${by}`, by }] : []),
       ...(endsWaiver ? [{ tag: "WaiverEnded" as const, reason: `switched off by ${by}`, by }] : []),
+      ...(h !== undefined ? [h.event] : []),
     ],
     actions: [notify(fill(t.stopped, { room })), ...(unit.state !== "off" ? [call("climate.set_hvac_mode", p.climate, { hvac_mode: "off" })] : [])],
-    timers: [WISH, WISH_CHECK, WAIVER, EVAL].filter((id) => ctx.timer(id) !== undefined).map((id) => cancelTimer(id)),
+    timers: [
+      ...[WISH, WISH_CHECK, WAIVER, EVAL].filter((id) => ctx.timer(id) !== undefined).map((id) => cancelTimer(id)),
+      ...(h !== undefined ? [h.timer] : []),
+    ],
   });
 }
 
@@ -564,7 +698,8 @@ function holdWish(state: GuardState, wish: Wish, input: Input, ctx: DecideCtx<Cl
     // A cloud unit's late report of the state before the switch is not someone switching it.
     if (recent && input.kind === "signal") return later(wish, ctx, `${p.climate} reports ${unit.state} within ${p.graceSec ?? 300} s of the wish's send: looked at again then`);
     const who = input.kind === "signal" ? (input.user !== undefined ? `user ${input.user}` : "the device") : "someone";
-    return endWish(state, ctx, `the unit was switched ${unit.state} by ${who}`, { stopped: unit.state });
+    const heldBy = unit.state === "off" && input.kind === "signal" && input.user !== undefined && holds(p) ? input.user : undefined;
+    return endWish(state, ctx, `the unit was switched ${unit.state} by ${who}`, { stopped: unit.state, ...(heldBy !== undefined ? { heldBy } : {}) });
   }
   const setpoint = unit.attributes["temperature"];
   if (setpoint === wish.target) return input.kind === "start" ? { why: `wish holds: ${p.climate} heats at ${wish.target}° until ${wish.untilText}` } : undefined;
@@ -593,7 +728,7 @@ function later(wish: Wish, ctx: DecideCtx<ClimateGuardParams>, why: string): Gua
  * and where the guard holds no heating setpoint, the one it had before comes back. Ended
  * by someone switching the unit (stopped), it stays as they left it.
  */
-function endWish(state: GuardState, ctx: DecideCtx<ClimateGuardParams>, reason: string, o: { by?: string; firing?: boolean; reply?: boolean; stopped?: string } = {}): GuardDecision {
+function endWish(state: GuardState, ctx: DecideCtx<ClimateGuardParams>, reason: string, o: { by?: string; firing?: boolean; reply?: boolean; stopped?: string; heldBy?: string } = {}): GuardDecision {
   const p = ctx.params;
   const wish = state.wish!;
   const room = p.warm?.room ?? p.climate;
@@ -613,14 +748,17 @@ function endWish(state: GuardState, ctx: DecideCtx<ClimateGuardParams>, reason: 
     }
   }
   const text = o.stopped !== undefined ? fill(t.wishStopped, { room, mode: o.stopped }) : fill(t.wishEnded, { room });
+  // Switched off by a person: the hold after it, as outside a wish (after WishEnded, which starts the state over).
+  const h = o.heldBy !== undefined ? hold(ctx, o.heldBy) : undefined;
   return {
-    why: `wish for ${room} ${reason}${back.length > 0 ? `: back to ${wish.before.mode}${wish.before.temperature !== undefined ? ` at ${wish.before.temperature}°` : ""}` : ""}${d?.why !== undefined ? ` · ${d.why}` : ""}`,
-    events: [{ tag: "WishEnded", reason, ...(o.by !== undefined ? { by: o.by } : {}) }, ...(d?.events ?? [])],
+    why: `wish for ${room} ${reason}${back.length > 0 ? `: back to ${wish.before.mode}${wish.before.temperature !== undefined ? ` at ${wish.before.temperature}°` : ""}` : ""}${h !== undefined ? `; no start until ${clock(h.until, ctx)}` : ""}${d?.why !== undefined ? ` · ${d.why}` : ""}`,
+    events: [{ tag: "WishEnded", reason, ...(o.by !== undefined ? { by: o.by } : {}) }, ...(h !== undefined ? [h.event] : []), ...(d?.events ?? [])],
     // A reply to whoever ended it; otherwise a report.
     actions: [notify(text, o.reply === true ? {} : { info: true }), ...back, ...(d?.actions ?? [])],
     timers: [
       ...(!o.firing && ctx.timer(WISH) !== undefined ? [cancelTimer(WISH)] : []),
       ...(ctx.timer(WISH_CHECK) !== undefined ? [cancelTimer(WISH_CHECK)] : []),
+      ...(h !== undefined ? [h.timer] : []),
       ...(d?.timers ?? []),
     ],
   };
