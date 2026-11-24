@@ -1,19 +1,28 @@
 # Changelog
 
-## Unreleased
+## Unreleased — no more stalls during a burst of activity
 
+- **Teobeanie no longer freezes for seconds at a time.** The timeline of service calls
+  (the panel's call history) was brought up to date by reading the whole call history,
+  every 2 seconds and again after every journal write. With a few months of history that took most of a second
+  each time, and during a burst (a button press that sends a notice, sets a helper and
+  flashes a lamp) it added up to ten seconds and more in which Teobeanie did nothing else:
+  Home Assistant's answers, the heuristics' timers and the Telegram chat all waited. Calls
+  Home Assistant had run at once were reported as timed out and sent again, a lamp's
+  one-second flash lasted five, and Telegram connections could fail with `ETIMEDOUT`. The
+  timeline now reads only the calls added since it last looked. The add-on log now warns
+  `event loop blocked for about N ms` when Teobeanie is held up for a second or more.
 - **An own call that timed out is still Teobeanie's.** When Home Assistant's answer to a
   call did not come within 10 seconds, Teobeanie gave up on it and forgot it had made it.
-  HA had usually run the call anyway, and its event, seen a few seconds later, was reported
-  as "Supervisor (a system user) called … Another automation may be working against
-  Teobeanie". The same happened to the first try of a call whose retry went through. A
-  call that got no answer (a timeout, a dropped connection) is now matched to its event
-  for up to a minute, like one still waiting for its answer. A call HA refused is not.
+  Home Assistant had usually run the call anyway, and its event, seen a few seconds later,
+  was reported as "Supervisor (a system user) called … Another automation may be working
+  against Teobeanie". A call that got no answer (a timeout, a dropped connection) is now
+  matched to its event for up to a minute. A call Home Assistant refused is not.
 - **…and it is done, not failed.** The same calls were reported as "failed: HA command
-  call_service timed out (also after a retry)", and sent a second time, although HA had
-  run them. When the call's event shows that HA ran it, the call now counts as done (the
-  add-on log says its answer did not come) and is not sent again. A call HA answered with
-  an error is still a failure.
+  call_service timed out (also after a retry)", and sent a second time, although Home
+  Assistant had run them. When the call's event shows that Home Assistant ran it, the call
+  now counts as done (the add-on log says its answer did not come) and is not sent again.
+  A call Home Assistant answered with an error is still a failure.
 
 ## 0.8.7 — no false "another automation" alarm; a switch-off stands
 

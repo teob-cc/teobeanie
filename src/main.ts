@@ -9,11 +9,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { categoryTypes, ulid, type OnPersisted } from "@lambda-house/teob-ts/core";
 import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite";
-import {
-  createProjectionRunner,
-  createSqliteProjectionStore,
-  type ProjectionRunner,
-} from "@lambda-house/teob-ts/projection";
+import { createSqliteProjectionStore } from "@lambda-house/teob-ts/projection";
 import { createReadApi, createStreamBus, journalFrame, type StreamFrame } from "@lambda-house/teob-ts/http";
 import {
   createHaBridge,
@@ -39,7 +35,7 @@ import {
   type AuditReply,
 } from "./audit.js";
 import { createAttributor, createOwnCalls, createUserDirectory } from "./attribution.js";
-import { noderedTimeline } from "./projections.js";
+import { createTimelineFold, type TimelineFold } from "./projections.js";
 import { buildTiles, checkTileCoverage, loadHouseConfig } from "./tiles.js";
 import { createHouseService, type HouseConfig } from "./house/service.js";
 import { createEnergyService } from "./energy/service.js";
@@ -222,17 +218,31 @@ log("info", `heuristics: ${heuristics.instances().length} instances, ${routes.le
 // 3. Stream bus (SSE fan-out).
 const bus = createStreamBus();
 
-// 4. Projection runner is created at step 7, the monitor at 5a; the persist hook closes over these lets.
-let projectionRunner: ProjectionRunner | undefined;
+// 4. The timeline fold is created at step 7, the monitor at 5a; the persist hook closes over these lets.
+let timeline: (TimelineFold & { catchUp(): void }) | undefined;
 let monitor: Monitor | undefined;
+/** One fold after a burst of audit batches, once the batch that asked for it is done. */
+let foldQueued = false;
+const foldSoon = (): void => {
+  if (foldQueued) return;
+  foldQueued = true;
+  queueMicrotask(() => {
+    foldQueued = false;
+    try {
+      timeline?.fold();
+    } catch (err) {
+      log("error", `timeline: ${String(err)}`);
+    }
+  });
+};
 
-// 5. Sqlite runtime + audit aggregates; post-persist hook feeds SSE, nudges projections
-// and shows the monitor every batch. Heuristic instances run in runtimes of their own
-// over the same journal (host.ts).
+// 5. Sqlite runtime + audit aggregates; post-persist hook feeds SSE, folds an audit batch
+// into the timeline and shows the monitor every batch. Heuristic instances run in
+// runtimes of their own over the same journal (host.ts).
 const journalPath = join(config.dataDir, "journal.db");
 const onPersisted: OnPersisted = (batch) => {
   bus.publish(journalFrame(batch));
-  projectionRunner?.nudge();
+  if (batch.category === AUDIT_CATEGORY) foldSoon();
   monitor?.onPersisted(batch);
 };
 const { runtime, journal } = createSqliteRuntime({ path: journalPath, onPersisted }, [
@@ -278,18 +288,30 @@ if (notifier !== undefined && (monitorAlerts || summaryTime.trim() !== "")) {
 // 6. Signals ring store.
 const signalStore = createSignalStore({ path: join(config.dataDir, "signals.db") });
 
-// 7. Views db + projection runner (2 s poll as safety net; nudge is the fast path).
+// 7. Views db + the timeline: caught up once, then folded from its offset after each audit
+// batch (a 2 s poll as safety net). Not teob-ts' projection runner: it read the whole
+// audit stream on every cycle, which held the event loop for seconds (projections.ts).
 const viewsDb = new Database(join(config.dataDir, "views.db"));
 const projectionStore = createSqliteProjectionStore(viewsDb);
-projectionRunner = createProjectionRunner({
-  entries: [{ projection: noderedTimeline, eventCodec: auditEventCodec }],
-  journal,
-  store: projectionStore,
-  pollIntervalMs: 2000,
-});
-projectionRunner.runOnce();
-projectionRunner.start();
-const runner: ProjectionRunner = projectionRunner;
+const timelineFold = createTimelineFold({ journal, store: projectionStore });
+timelineFold.catchUp();
+log("info", `timeline caught up in ${Math.round(timelineFold.stats().lastCycleMs ?? 0)} ms`);
+timeline = timelineFold;
+const timelinePoll = setInterval(foldSoon, 2000);
+timelinePoll.unref();
+
+// The event loop held up: everything Teobeanie does waits meanwhile (HA's answers and
+// events, timers, the chat). Logged, so a stall shows in the add-on log with its length.
+const LOOP_CHECK_MS = 500;
+const LOOP_BLOCKED_MS = 1000;
+let loopCheckedAt = performance.now();
+const loopCheck = setInterval(() => {
+  const t = performance.now();
+  const late = t - loopCheckedAt - LOOP_CHECK_MS;
+  loopCheckedAt = t;
+  if (late >= LOOP_BLOCKED_MS) log("warning", `event loop blocked for about ${Math.round(late)} ms`);
+}, LOOP_CHECK_MS);
+loopCheck.unref();
 
 // 8. HA client; every call_service becomes a RecordCallService command, attributed:
 // Teobeanie's own (checked as the event arrives), a person, a system user, or the device.
@@ -697,7 +719,7 @@ const agentPortInfo: () => Promise<AgentPortInfo> =
 const health = (): HealthReport => {
   const haStats = ha.stats;
   const signalStats = signalStore.stats();
-  const runnerStats = runner.stats();
+  const runnerStats = timelineFold.stats();
   return {
     status: haStats.connected ? "ok" : "degraded",
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
@@ -772,7 +794,8 @@ const shutdown = (): void => {
   log("info", "shutting down");
   void (async () => {
     configWatch.close();
-    await runner.stop();
+    clearInterval(timelinePoll);
+    clearInterval(loopCheck);
     await heuristics.stop();
     monitor?.stop();
     telegram?.stop();
