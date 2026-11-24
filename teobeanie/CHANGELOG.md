@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **An own call that timed out is still Teobeanie's.** When Home Assistant's answer to a
+  call did not come within 10 seconds, Teobeanie gave up on it and forgot it had made it.
+  HA had usually run the call anyway, and its event, seen a few seconds later, was reported
+  as "Supervisor (a system user) called … Another automation may be working against
+  Teobeanie". The same happened to the first try of a call whose retry went through. A
+  call that got no answer (a timeout, a dropped connection) is now matched to its event
+  for up to a minute, like one still waiting for its answer. A call HA refused is not.
+
 ## 0.8.7 — no false "another automation" alarm; a switch-off stands
 
 - **Teobeanie's own call is recognised when it is seen late.** A service call was matched

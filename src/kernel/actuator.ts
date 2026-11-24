@@ -3,7 +3,7 @@
 // active mode only, execute(). Bounds and ownership are code, not configuration a
 // heuristic can widen; the house may narrow them (allowlist.json "bounds").
 
-import type { OwnCalls } from "../attribution.js";
+import { NO_ANSWER, type OwnCalls } from "../attribution.js";
 import { causeOf } from "./error-cause.js";
 import type { Action, HouseBound, Json } from "./heuristic.js";
 
@@ -42,6 +42,13 @@ export interface CallGatewayLike {
     target?: { entity_id?: string | string[] };
   }): Promise<{ context: { id: string } }>;
 }
+
+/**
+ * Whether a failed call was answered by HA (an error named HaCommandError, as the
+ * teob-ts client throws it), rather than given up on: a timeout or a dropped connection
+ * says nothing about whether HA ran it.
+ */
+const answeredByHa = (err: unknown): boolean => (err as { name?: unknown } | null)?.name === "HaCommandError";
 
 export interface Notifier {
   /** from: the instance whose notice it is (absent for Teobeanie's own messages, replies to a command and reports). */
@@ -234,7 +241,7 @@ export function createSafeActuator(deps: {
         settle?.(res.context.id);
         return { ok: true, haContextId: res.context.id };
       } catch (err) {
-        settle?.();
+        settle?.(answeredByHa(err) ? undefined : NO_ANSWER);
         throw err;
       }
     } catch (err) {

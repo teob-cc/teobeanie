@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  NO_ANSWER,
   REQUEST_WINDOW_MS,
   createAttributor,
   createOwnCalls,
@@ -103,10 +104,46 @@ describe("own calls", () => {
     expect(own.claim(call())).toBe(false);
   });
 
-  it("a failed call leaves nothing behind", () => {
+  it("a call HA refused leaves nothing behind", () => {
     const own = createOwnCalls();
     own.requested("light", "turn_on", ["light.hall_upper"])();
     expect(own.claim(call())).toBe(false);
+  });
+
+  it("a call that got no answer keeps its request: HA may have run it, its event seen after the timeout is Teobeanie's", () => {
+    let t = 0;
+    const own = createOwnCalls(() => t);
+    const settle = own.requested("input_select", "select_option", ["input_select.cat"]);
+    t = 10_000;
+    settle(NO_ANSWER);
+    t = 32_000;
+    expect(own.claim(call({ domain: "input_select", service: "select_option", entityIds: ["input_select.cat"], contextId: "ctx-late" }))).toBe(true);
+    // Consumed like any other match.
+    expect(own.claim(call({ domain: "input_select", service: "select_option", entityIds: ["input_select.cat"], contextId: "ctx-other" }))).toBe(false);
+  });
+
+  it("a request with no answer still closes with the window", () => {
+    let t = 0;
+    const own = createOwnCalls(() => t);
+    own.requested("light", "turn_on", ["light.hall_upper"])(NO_ANSWER);
+    t = REQUEST_WINDOW_MS + 1;
+    expect(own.claim(call())).toBe(false);
+  });
+
+  it("a timed-out try and its retry: both events are Teobeanie's, whichever comes when", () => {
+    let t = 0;
+    const own = createOwnCalls(() => t);
+    const first = own.requested("light", "turn_on", ["light.hall_upper"]);
+    t = 10_000;
+    first(NO_ANSWER);
+    t = 15_000;
+    const retry = own.requested("light", "turn_on", ["light.hall_upper"]);
+    t = 16_000;
+    // The first try's event, late; then the retry's event, before its answer.
+    expect(own.claim(call({ contextId: "ctx-first" }))).toBe(true);
+    expect(own.claim(call({ contextId: "ctx-retry" }))).toBe(true);
+    retry("ctx-retry");
+    expect(own.claim(call({ contextId: "ctx-alex" }))).toBe(false);
   });
 });
 
@@ -233,5 +270,58 @@ describe("the actuator registers Teobeanie's calls", () => {
     await h.actuator.execute(action);
     h.fire("ctx-other");
     expect(await Promise.all(h.seen)).toEqual(["teob", "system:Supervisor"]);
+  });
+});
+
+describe("the actuator keeps a call HA did not answer (19:08, 24 Nov: cat-tunnel's flash)", () => {
+  const action: Action = { kind: "call", service: "input_select.select_option", entities: ["input_select.cat"], data: { option: "away" } };
+  const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
+
+  /** HA runs every try at once; the add-on reads neither the answer nor the event in time. */
+  function stalled(error: Error) {
+    const own = createOwnCalls();
+    const attribute = createAttributor({ own, users: directory().users });
+    const seen: Array<Promise<string>> = [];
+    let tries = 0;
+    const fire = (contextId: string) =>
+      seen.push(attribute({ domain: "input_select", service: "select_option", entityIds: ["input_select.cat"], contextId, userId: "5up3rv150r000000" }));
+    const actuator = createSafeActuator({
+      ha: {
+        callService: async () => {
+          tries++;
+          throw error;
+        },
+      },
+      ownCalls: own,
+      sleep: async () => {},
+    });
+    return { actuator, seen, fire, tries: () => tries };
+  }
+
+  it("a timeout, retried and timed out again: the events seen afterwards are Teobeanie's, not the Supervisor's", async () => {
+    const h = stalled(named("HaTimeoutError", "HA command call_service timed out after 10000ms"));
+    const out = await h.actuator.execute(action);
+    expect(out).toEqual({ ok: false, error: "HA command call_service timed out after 10000ms (also after a retry)" });
+    expect(h.tries()).toBe(2);
+    h.fire("ctx-try-1");
+    h.fire("ctx-try-2");
+    expect(await Promise.all(h.seen)).toEqual(["teob", "teob"]);
+    // Both requests are used up: a third identical call is somebody else's.
+    h.fire("ctx-other");
+    expect(await h.seen[2]).toBe("system:Supervisor");
+  });
+
+  it("a dropped connection is no answer either", async () => {
+    const h = stalled(named("HaDisconnectedError", "Home Assistant connection lost"));
+    await h.actuator.execute(action);
+    h.fire("ctx-try-1");
+    expect(await Promise.all(h.seen)).toEqual(["teob"]);
+  });
+
+  it("a call HA refused is over: an identical call afterwards is the Supervisor's", async () => {
+    const h = stalled(named("HaCommandError", "Option away is not valid"));
+    await h.actuator.execute(action);
+    h.fire("ctx-other");
+    expect(await Promise.all(h.seen)).toEqual(["system:Supervisor"]);
   });
 });

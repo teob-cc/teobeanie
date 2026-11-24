@@ -9,6 +9,8 @@
 // the context id HA gives back once it returns. An event matches a pending request, or
 // carries a context id Teobeanie owns; that context id also covers the calls HA makes on
 // Teobeanie's behalf (homeassistant.turn_on, a script) whichever side of the answer they fall.
+// A call that got no answer (it timed out, the connection dropped) keeps its request: HA
+// may have run it already and the event is still on its way, or may run it yet.
 
 export type Origin = typeof OWN_ORIGIN | "device" | `person:${string}` | `system:${string}` | `user:${string}`;
 
@@ -28,13 +30,23 @@ export const LEGACY_ORIGIN = "nodered";
  * was reported as another automation's; the answer, which ends the wait, comes after the event.
  */
 export const REQUEST_WINDOW_MS = 60_000;
+/**
+ * settle(NO_ANSWER): the call got no answer, so nobody knows whether HA ran it. Its request
+ * stays pending until its event comes or the window closes. Dropping it, as a failure did,
+ * reported the event of a call that timed out but ran as another automation's.
+ */
+export const NO_ANSWER: unique symbol = Symbol("no answer");
+
 /** How long a context id stays Teobeanie's: long enough for a script Teobeanie started to finish. */
 const CONTEXT_TTL_MS = 10 * 60_000;
 const CONTEXT_CAP = 500;
 
 export interface OwnCalls {
-  /** Before the call is sent; the returned settle() takes HA's context id (none when it failed). */
-  requested(domain: string, service: string, entities: string[]): (contextId?: string) => void;
+  /**
+   * Before the call is sent. The returned settle() takes HA's answer: its context id, none
+   * when HA refused the call, or NO_ANSWER when none came (a timeout, a dropped connection).
+   */
+  requested(domain: string, service: string, entities: string[]): (answer?: string | typeof NO_ANSWER) => void;
   /**
    * Whether an observed call is Teobeanie's: its context id is one of Teobeanie's, or it is the
    * call a pending request is waiting for (same service, same entities). A match by
@@ -66,9 +78,10 @@ export function createOwnCalls(now: () => number = Date.now): OwnCalls {
     requested(domain, service, entities) {
       const req = { domain, service, entities, at: now() };
       pending.add(req);
-      return (contextId) => {
+      return (answer) => {
+        if (answer === NO_ANSWER) return;
         pending.delete(req);
-        if (contextId !== undefined) remember(contextId);
+        if (answer !== undefined) remember(answer);
       };
     },
 
