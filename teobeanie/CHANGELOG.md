@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — no more stalls during a burst of activity
+## 0.8.8 — no more stalls during a burst of activity
 
 - **Teobeanie no longer freezes for seconds at a time.** The timeline of service calls
   (the panel's call history) was brought up to date by reading the whole call history,
