@@ -70,8 +70,8 @@ describe("own calls", () => {
 
   it("an event arriving after HA answered matches by context id", () => {
     const own = createOwnCalls();
-    const settle = own.requested("light", "turn_on", ["light.hall_upper"]);
-    settle("ctx-teob");
+    const req = own.requested("light", "turn_on", ["light.hall_upper"]);
+    req.settle("ctx-teob");
     expect(own.claim(call({ contextId: "ctx-teob" }))).toBe(true);
     // Settling dropped the request: a person's identical call is theirs.
     expect(own.claim(call({ contextId: "ctx-alex" }))).toBe(false);
@@ -88,10 +88,10 @@ describe("own calls", () => {
   it("an event seen seconds late, HA's answer still out, is Teobeanie's", () => {
     let t = 0;
     const own = createOwnCalls(() => t);
-    const settle = own.requested("light", "turn_off", ["light.hall_upper"]);
+    const req = own.requested("light", "turn_off", ["light.hall_upper"]);
     t = 8_000;
     expect(own.claim(call({ service: "turn_off", contextId: "ctx-late" }))).toBe(true);
-    settle("ctx-late");
+    req.settle("ctx-late");
     // Once answered, the same call again is somebody else's unless it carries the context.
     expect(own.claim(call({ service: "turn_off", contextId: "ctx-other" }))).toBe(false);
   });
@@ -106,16 +106,16 @@ describe("own calls", () => {
 
   it("a call HA refused leaves nothing behind", () => {
     const own = createOwnCalls();
-    own.requested("light", "turn_on", ["light.hall_upper"])();
+    own.requested("light", "turn_on", ["light.hall_upper"]).settle();
     expect(own.claim(call())).toBe(false);
   });
 
   it("a call that got no answer keeps its request: HA may have run it, its event seen after the timeout is Teobeanie's", () => {
     let t = 0;
     const own = createOwnCalls(() => t);
-    const settle = own.requested("input_select", "select_option", ["input_select.cat"]);
+    const req = own.requested("input_select", "select_option", ["input_select.cat"]);
     t = 10_000;
-    settle(NO_ANSWER);
+    req.settle(NO_ANSWER);
     t = 32_000;
     expect(own.claim(call({ domain: "input_select", service: "select_option", entityIds: ["input_select.cat"], contextId: "ctx-late" }))).toBe(true);
     // Consumed like any other match.
@@ -125,7 +125,7 @@ describe("own calls", () => {
   it("a request with no answer still closes with the window", () => {
     let t = 0;
     const own = createOwnCalls(() => t);
-    own.requested("light", "turn_on", ["light.hall_upper"])(NO_ANSWER);
+    own.requested("light", "turn_on", ["light.hall_upper"]).settle(NO_ANSWER);
     t = REQUEST_WINDOW_MS + 1;
     expect(own.claim(call())).toBe(false);
   });
@@ -135,14 +135,14 @@ describe("own calls", () => {
     const own = createOwnCalls(() => t);
     const first = own.requested("light", "turn_on", ["light.hall_upper"]);
     t = 10_000;
-    first(NO_ANSWER);
+    first.settle(NO_ANSWER);
     t = 15_000;
     const retry = own.requested("light", "turn_on", ["light.hall_upper"]);
     t = 16_000;
     // The first try's event, late; then the retry's event, before its answer.
     expect(own.claim(call({ contextId: "ctx-first" }))).toBe(true);
     expect(own.claim(call({ contextId: "ctx-retry" }))).toBe(true);
-    retry("ctx-retry");
+    retry.settle("ctx-retry");
     expect(own.claim(call({ contextId: "ctx-alex" }))).toBe(false);
   });
 });
@@ -221,9 +221,9 @@ describe("attributor", () => {
 
   it("the own-call check happens when the event arrives, not after the name lookup", async () => {
     const own = createOwnCalls();
-    const settle = own.requested("light", "turn_on", ["light.hall_upper"]);
+    const req = own.requested("light", "turn_on", ["light.hall_upper"]);
     const by = attributor(own)(call({ contextId: "ctx-teob", userId: "5up3rv150r000000" }));
-    settle("ctx-teob");
+    req.settle("ctx-teob");
     expect(await by).toBe("teob");
   });
 });
@@ -323,5 +323,81 @@ describe("the actuator keeps a call HA did not answer (19:08, 24 Nov: cat-tunnel
     await h.actuator.execute(action);
     h.fire("ctx-other");
     expect(await Promise.all(h.seen)).toEqual(["system:Supervisor"]);
+  });
+});
+
+describe("a call HA ran though its answer never came is done, not failed", () => {
+  const action: Action = { kind: "call", service: "input_select.select_option", entities: ["input_select.cat"], data: { option: "away" } };
+  const timeout = (): Error => Object.assign(new Error("HA command call_service timed out after 10000ms"), { name: "HaTimeoutError" });
+
+  /**
+   * HA gets each try; whether the add-on then reads the call_service event before giving up
+   * on the answer ("before"), during the wait for the retry ("wait"), or never, is per try.
+   */
+  function house(tries: Array<{ event?: "before" | "wait"; error?: Error }>) {
+    const own = createOwnCalls();
+    const attribute = createAttributor({ own, users: directory().users });
+    const seen: Array<Promise<string>> = [];
+    const logs: string[] = [];
+    const slept: number[] = [];
+    let n = 0;
+    let late: string | undefined;
+    const fire = (contextId: string) =>
+      seen.push(attribute({ domain: "input_select", service: "select_option", entityIds: ["input_select.cat"], contextId, userId: "5up3rv150r000000" }));
+    const actuator = createSafeActuator({
+      ha: {
+        callService: async () => {
+          const t = tries[n++]!;
+          const ctx = `ctx-try-${n}`;
+          if (t.event === "before") fire(ctx);
+          if (t.event === "wait") late = ctx;
+          throw t.error ?? timeout();
+        },
+      },
+      ownCalls: own,
+      sleep: async (ms) => {
+        slept.push(ms);
+        if (late !== undefined) fire(late);
+        late = undefined;
+      },
+      log: (level, msg) => logs.push(`${level} ${msg}`),
+    });
+    return { actuator, seen, logs, slept, tries: () => n };
+  }
+
+  it("the event comes while waiting to retry (the add-on stalled, HA ran it at once): done, not sent again", async () => {
+    const h = house([{ event: "wait" }, {}]);
+    expect(await h.actuator.execute(action)).toEqual({ ok: true, haContextId: "ctx-try-1" });
+    expect(h.tries()).toBe(1);
+    expect(await Promise.all(h.seen)).toEqual(["teob"]);
+    expect(h.logs).toEqual([
+      "info actuator: input_select.select_option input_select.cat: HA command call_service timed out after 10000ms, but HA ran it (its call_service event came); counted as done, not retried",
+    ]);
+  });
+
+  it("the event came before the answer was given up on (HA slow to answer): done at once, no wait", async () => {
+    const h = house([{ event: "before" }]);
+    expect(await h.actuator.execute(action)).toEqual({ ok: true, haContextId: "ctx-try-1" });
+    expect(h.slept).toEqual([]);
+    expect(h.tries()).toBe(1);
+  });
+
+  it("no event for the first try: retried, and the retry's late event makes it done", async () => {
+    const h = house([{}, { event: "before" }]);
+    expect(await h.actuator.execute(action)).toEqual({ ok: true, haContextId: "ctx-try-2" });
+    expect(h.tries()).toBe(2);
+  });
+
+  it("no event for either try: failed, as before", async () => {
+    const h = house([{}, {}]);
+    expect(await h.actuator.execute(action)).toEqual({ ok: false, error: "HA command call_service timed out after 10000ms (also after a retry)" });
+    expect(h.logs).toEqual([]);
+  });
+
+  it("HA ran it and answered with an error: failed, the event does not make it done", async () => {
+    const refused = Object.assign(new Error("Device did not respond"), { name: "HaCommandError" });
+    const h = house([{ event: "before", error: refused }, { event: "before", error: refused }]);
+    expect(await h.actuator.execute(action)).toEqual({ ok: false, error: "Device did not respond (also after a retry)" });
+    expect(await Promise.all(h.seen)).toEqual(["teob", "teob"]);
   });
 });

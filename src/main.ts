@@ -177,6 +177,7 @@ const actuator = createSafeActuator({
   // The code's bounds, then the house's (allowlist.json), as of the latest reload.
   bounds: () => allowlist.house.bounds ?? DEFAULT_BOUNDS,
   ownCalls,
+  log,
   ...(notifier !== undefined ? { notifier } : {}),
 });
 // The bridge is created at step 9 (and replaced when a reload changes the routes);

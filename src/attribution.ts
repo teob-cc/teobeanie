@@ -10,7 +10,8 @@
 // carries a context id Teobeanie owns; that context id also covers the calls HA makes on
 // Teobeanie's behalf (homeassistant.turn_on, a script) whichever side of the answer they fall.
 // A call that got no answer (it timed out, the connection dropped) keeps its request: HA
-// may have run it already and the event is still on its way, or may run it yet.
+// may have run it already and the event is still on its way, or may run it yet. The event,
+// when it comes, also tells the actuator that HA ran the call after all.
 
 export type Origin = typeof OWN_ORIGIN | "device" | `person:${string}` | `system:${string}` | `user:${string}`;
 
@@ -41,12 +42,17 @@ export const NO_ANSWER: unique symbol = Symbol("no answer");
 const CONTEXT_TTL_MS = 10 * 60_000;
 const CONTEXT_CAP = 500;
 
+/** One call Teobeanie is making, as the audit knows it. */
+export interface OwnRequest {
+  /** HA's answer: its context id, none when HA refused the call, or NO_ANSWER when none came (a timeout, a dropped connection). */
+  settle(answer?: string | typeof NO_ANSWER): void;
+  /** Once a call_service event matched the request, HA ran the call: the event's context id (null: it had none). Before: undefined. */
+  ran(): string | null | undefined;
+}
+
 export interface OwnCalls {
-  /**
-   * Before the call is sent. The returned settle() takes HA's answer: its context id, none
-   * when HA refused the call, or NO_ANSWER when none came (a timeout, a dropped connection).
-   */
-  requested(domain: string, service: string, entities: string[]): (answer?: string | typeof NO_ANSWER) => void;
+  /** Before the call is sent. */
+  requested(domain: string, service: string, entities: string[]): OwnRequest;
   /**
    * Whether an observed call is Teobeanie's: its context id is one of Teobeanie's, or it is the
    * call a pending request is waiting for (same service, same entities). A match by
@@ -60,8 +66,17 @@ const sameSet = (a: string[], b: string[]): boolean => {
   return s.size === new Set(b).size && b.every((x) => s.has(x));
 };
 
+/** A request not yet matched or settled; `ran` is set by the event that matches it. */
+interface Pending {
+  domain: string;
+  service: string;
+  entities: string[];
+  at: number;
+  ran?: string | null;
+}
+
 export function createOwnCalls(now: () => number = Date.now): OwnCalls {
-  const pending = new Set<{ domain: string; service: string; entities: string[]; at: number }>();
+  const pending = new Set<Pending>();
   /** context id → when Teobeanie got it; insertion order is age order. */
   const contexts = new Map<string, number>();
 
@@ -76,12 +91,15 @@ export function createOwnCalls(now: () => number = Date.now): OwnCalls {
 
   return {
     requested(domain, service, entities) {
-      const req = { domain, service, entities, at: now() };
+      const req: Pending = { domain, service, entities, at: now() };
       pending.add(req);
-      return (answer) => {
-        if (answer === NO_ANSWER) return;
-        pending.delete(req);
-        if (answer !== undefined) remember(answer);
+      return {
+        settle(answer) {
+          if (answer === NO_ANSWER) return;
+          pending.delete(req);
+          if (answer !== undefined) remember(answer);
+        },
+        ran: () => req.ran,
       };
     },
 
@@ -97,6 +115,7 @@ export function createOwnCalls(now: () => number = Date.now): OwnCalls {
         }
         if (req.domain !== e.domain || req.service !== e.service || !sameSet(req.entities, e.entityIds)) continue;
         pending.delete(req);
+        req.ran = e.contextId;
         if (e.contextId !== null) remember(e.contextId);
         return true;
       }

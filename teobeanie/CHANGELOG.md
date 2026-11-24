@@ -9,6 +9,11 @@
   Teobeanie". The same happened to the first try of a call whose retry went through. A
   call that got no answer (a timeout, a dropped connection) is now matched to its event
   for up to a minute, like one still waiting for its answer. A call HA refused is not.
+- **…and it is done, not failed.** The same calls were reported as "failed: HA command
+  call_service timed out (also after a retry)", and sent a second time, although HA had
+  run them. When the call's event shows that HA ran it, the call now counts as done (the
+  add-on log says its answer did not come) and is not sent again. A call HA answered with
+  an error is still a failure.
 
 ## 0.8.7 — no false "another automation" alarm; a switch-off stands
 

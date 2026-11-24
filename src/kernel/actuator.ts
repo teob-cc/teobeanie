@@ -3,7 +3,7 @@
 // active mode only, execute(). Bounds and ownership are code, not configuration a
 // heuristic can widen; the house may narrow them (allowlist.json "bounds").
 
-import { NO_ANSWER, type OwnCalls } from "../attribution.js";
+import { NO_ANSWER, type OwnCalls, type OwnRequest } from "../attribution.js";
 import { causeOf } from "./error-cause.js";
 import type { Action, HouseBound, Json } from "./heuristic.js";
 
@@ -49,6 +49,9 @@ export interface CallGatewayLike {
  * says nothing about whether HA ran it.
  */
 const answeredByHa = (err: unknown): boolean => (err as { name?: unknown } | null)?.name === "HaCommandError";
+
+/** "light.turn_on light.hall" or "a notice", for the log. */
+const actionLabel = (a: Action): string => (a.kind === "call" ? `${a.service} ${a.entities.join(", ")}` : "a notice");
 
 export interface Notifier {
   /** from: the instance whose notice it is (absent for Teobeanie's own messages, replies to a command and reports). */
@@ -105,6 +108,7 @@ export function createSafeActuator(deps: {
    */
   retryAfterMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  log?: (level: "debug" | "info" | "warn" | "error", msg: string) => void;
 }): SafeActuator {
   const owners = new Map<string, string>();
   /** entity → instances that may operate it besides its owner. */
@@ -187,13 +191,33 @@ export function createSafeActuator(deps: {
     },
 
     async execute(action, from) {
-      const first = await attempt(action, from);
-      if (first.ok || retryAfterMs <= 0 || !retriable(first.error)) return first;
+      // The tries HA gave no answer to (a timeout, a dropped connection). HA may have run
+      // one all the same: its call_service event, seen after the answer was given up on,
+      // says so. Such a call is done: not sent again, not reported as failed.
+      const unanswered: OwnRequest[] = [];
+      const ranAnyway = (failed: ActionOutcome): ActionOutcome | undefined => {
+        for (const r of unanswered) {
+          const ctx = r.ran();
+          if (ctx === undefined) continue;
+          deps.log?.("info", `actuator: ${actionLabel(action)}: ${failed.error}, but HA ran it (its call_service event came); counted as done, not retried`);
+          return { ok: true, ...(ctx !== null ? { haContextId: ctx } : {}) };
+        }
+        return undefined;
+      };
+      const first = await attempt(action, from, unanswered);
+      if (first.ok) return first;
+      if (retryAfterMs <= 0 || !retriable(first.error)) return ranAnyway(first) ?? first;
       if (action.kind === "notify" && deps.notifier?.retriesItself) return first;
+      const ranAtOnce = ranAnyway(first);
+      if (ranAtOnce !== undefined) return ranAtOnce;
       await sleep(retryAfterMs);
+      const ranMeanwhile = ranAnyway(first);
+      if (ranMeanwhile !== undefined) return ranMeanwhile;
       if (paused && !(from !== undefined && exempt.has(from))) return { ...first, error: `${first.error} (not retried: paused)` };
-      const second = await attempt(action, from);
-      return second.ok ? second : { ...second, error: `${second.error} (also after a retry)` };
+      const second = await attempt(action, from, unanswered);
+      if (second.ok) return second;
+      const failed = { ...second, error: `${second.error} (also after a retry)` };
+      return ranAnyway(failed) ?? failed;
     },
 
     forbid(entity, service, reason) {
@@ -220,8 +244,8 @@ export function createSafeActuator(deps: {
     owners: () => owners,
   };
 
-  /** One try of an action: what HA (or the chat) said. */
-  async function attempt(action: Action, from: string | undefined): Promise<ActionOutcome> {
+  /** One try of an action: what HA (or the chat) said. A call HA gave no answer to joins `unanswered`. */
+  async function attempt(action: Action, from: string | undefined, unanswered: OwnRequest[]): Promise<ActionOutcome> {
     try {
       if (action.kind === "notify") {
         if (deps.notifier === undefined) return { ok: false, error: "no notifier configured (telegram_bot_token/telegram_chat_id)" };
@@ -230,7 +254,7 @@ export function createSafeActuator(deps: {
         return { ok: true };
       }
       const [domain, service] = action.service.split(".") as [string, string];
-      const settle = deps.ownCalls?.requested(domain, service, action.entities);
+      const own = deps.ownCalls?.requested(domain, service, action.entities);
       try {
         const res = await deps.ha.callService({
           domain,
@@ -238,10 +262,17 @@ export function createSafeActuator(deps: {
           ...(action.data !== undefined ? { serviceData: action.data as Record<string, Json> } : {}),
           target: { entity_id: action.entities },
         });
-        settle?.(res.context.id);
+        own?.settle(res.context.id);
         return { ok: true, haContextId: res.context.id };
       } catch (err) {
-        settle?.(answeredByHa(err) ? undefined : NO_ANSWER);
+        if (own !== undefined) {
+          if (answeredByHa(err)) {
+            own.settle();
+          } else {
+            own.settle(NO_ANSWER);
+            unanswered.push(own);
+          }
+        }
         throw err;
       }
     } catch (err) {
